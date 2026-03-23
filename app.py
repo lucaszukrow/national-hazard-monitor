@@ -476,6 +476,32 @@ def build_folium_map(warnings, spc, earthquakes, storms, fires):
     </div>
     """
     m.get_root().html.add_child(folium.Element(title_html))
+    # NEXRAD live radar
+    folium.WmsTileLayer(
+        url="https://mesonet.agron.iastate.edu/cgi-bin/wms/nexrad/n0r.cgi",
+        layers="nexrad-n0r",
+        name="NEXRAD Radar (Live)",
+        fmt="image/png",
+        transparent=True,
+        overlay=True,
+        control=True,
+        show=True,
+        attr="Iowa State Mesonet"
+    ).add_to(m)
+
+    # GOES infrared satellite
+    folium.WmsTileLayer(
+        url="https://mesonet.agron.iastate.edu/cgi-bin/wms/goes/conus_ir.cgi",
+        layers="goes_conus_ir",
+        name="GOES Infrared (Live)",
+        fmt="image/png",
+        transparent=True,
+        overlay=True,
+        control=True,
+        show=False,
+        attr="Iowa State Mesonet"
+    ).add_to(m)
+
     folium.LayerControl(position="topright", collapsed=False).add_to(m)
 
     return m._repr_html_()
