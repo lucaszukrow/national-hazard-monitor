@@ -546,12 +546,16 @@ def run_update():
 def schedule_updates(interval_minutes=30):
     """Run update on schedule in background thread."""
     def loop():
+        # Initial update
+        print("Starting initial data update...")
+        run_update()
         while True:
-            run_update()
-            print(f"  Next update in {interval_minutes} minutes...")
+            print(f"Sleeping {interval_minutes} minutes until next update...")
             time.sleep(interval_minutes * 60)
+            run_update()
     t = threading.Thread(target=loop, daemon=True)
     t.start()
+    print(f"Background update thread started")
 
 # ─────────────────────────────────────────────
 # DASH APP
@@ -662,6 +666,11 @@ app.layout = html.Div(
     Input("refresh", "n_intervals")
 )
 def update_ui(n):
+    # Trigger update if data is stale or never loaded
+    if state["last_update"] == "Never" and not state["updating"]:
+        print("Dashboard triggered data update...")
+        t = threading.Thread(target=run_update, daemon=True)
+        t.start()
     s   = state["summary"]
     pop = s.get("total_population", 0)
 
