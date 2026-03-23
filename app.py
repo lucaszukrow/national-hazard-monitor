@@ -1,3 +1,11 @@
+# CRITICAL: gevent monkey patch must happen BEFORE any other imports
+# This fixes the "maximum recursion depth exceeded" error with SSL
+try:
+    from gevent import monkey
+    monkey.patch_all()
+except ImportError:
+    pass
+
 """
 National All-Hazards GIS Monitoring System
 Cloud deployment version — no ArcPy required
