@@ -597,6 +597,457 @@ def schedule_updates(interval_minutes=30):
 app = dash.Dash(__name__, title="National Hazard Monitor", update_title=None)
 server = app.server  # Expose Flask server for Render
 
+# ─────────────────────────────────────────────
+# FLASK API ENDPOINTS
+# Serve hazard data as GeoJSON for Mapbox map
+# ─────────────────────────────────────────────
+import flask as flask_module
+
+@app.server.route("/api/warnings")
+def api_warnings():
+    """Returns current NWS warnings as GeoJSON."""
+    return flask_module.Response(
+        json.dumps(state["warnings"]),
+        mimetype="application/json",
+        headers={"Access-Control-Allow-Origin": "*"}
+    )
+
+@app.server.route("/api/spc")
+def api_spc():
+    """Returns SPC convective outlook as GeoJSON."""
+    return flask_module.Response(
+        json.dumps(state["spc"]),
+        mimetype="application/json",
+        headers={"Access-Control-Allow-Origin": "*"}
+    )
+
+@app.server.route("/api/earthquakes")
+def api_earthquakes():
+    """Returns USGS earthquake data as GeoJSON."""
+    return flask_module.Response(
+        json.dumps(state["earthquakes"]),
+        mimetype="application/json",
+        headers={"Access-Control-Allow-Origin": "*"}
+    )
+
+@app.server.route("/api/fires")
+def api_fires():
+    """Returns NASA FIRMS fire data as GeoJSON points."""
+    features = []
+    for fire in state.get("fires", []):
+        try:
+            lat = float(fire.get("latitude", 0))
+            lon = float(fire.get("longitude", 0))
+            frp = float(fire.get("frp", 0))
+            if lat == 0 and lon == 0:
+                continue
+            features.append({
+                "type": "Feature",
+                "geometry": {"type": "Point", "coordinates": [lon, lat]},
+                "properties": {
+                    "frp":        frp,
+                    "acq_date":   fire.get("acq_date", ""),
+                    "confidence": fire.get("confidence", "")
+                }
+            })
+        except Exception:
+            continue
+    return flask_module.Response(
+        json.dumps({"type": "FeatureCollection", "features": features}),
+        mimetype="application/json",
+        headers={"Access-Control-Allow-Origin": "*"}
+    )
+
+@app.server.route("/api/summary")
+def api_summary():
+    """Returns current hazard summary stats."""
+    return flask_module.Response(
+        json.dumps({
+            "last_update": state["last_update"],
+            "summary":     state["summary"]
+        }),
+        mimetype="application/json",
+        headers={"Access-Control-Allow-Origin": "*"}
+    )
+
+@app.server.route("/mapbox")
+def mapbox_map():
+    """Serves the full Mapbox GL JS map page."""
+    MAPBOX_TOKEN = os.environ.get("MAPBOX_TOKEN", "")
+    html = f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>National Hazard Monitor</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <script src="https://api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.js"></script>
+    <link href="https://api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.css" rel="stylesheet">
+    <style>
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+        body {{ background: #0a0a0a; font-family: Arial, sans-serif; color: white; }}
+        #map {{ position: absolute; top: 0; bottom: 0; width: 100%; }}
+
+        #header {{
+            position: absolute; top: 16px; left: 50%; transform: translateX(-50%);
+            z-index: 10; background: rgba(10,10,10,0.92);
+            border: 1px solid #1B4F72; border-radius: 10px;
+            padding: 10px 24px; text-align: center;
+            backdrop-filter: blur(10px);
+        }}
+        #header h1 {{ font-size: 18px; color: #AAD4FF; margin: 0; }}
+        #header p  {{ font-size: 11px; color: #666; margin: 4px 0 0 0; }}
+
+        #stats {{
+            position: absolute; top: 16px; left: 16px; z-index: 10;
+            display: flex; flex-direction: column; gap: 6px;
+        }}
+        .stat-card {{
+            background: rgba(10,10,10,0.92); border-radius: 8px;
+            padding: 8px 14px; border: 1px solid #333;
+            backdrop-filter: blur(10px); min-width: 160px;
+        }}
+        .stat-value {{ font-size: 22px; font-weight: bold; line-height: 1; }}
+        .stat-label {{ font-size: 10px; color: #888; margin-top: 2px; }}
+
+        #legend {{
+            position: absolute; bottom: 40px; left: 16px; z-index: 10;
+            background: rgba(10,10,10,0.92); border-radius: 8px;
+            padding: 12px 16px; border: 1px solid #333;
+            backdrop-filter: blur(10px); font-size: 11px;
+            display: flex; gap: 20px;
+        }}
+        .legend-section h4 {{ color: #AAD4FF; margin: 0 0 8px 0; font-size: 12px; }}
+        .legend-item {{ display: flex; align-items: center; gap: 6px; margin: 3px 0; }}
+        .legend-dot {{ width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }}
+        .legend-box {{ width: 14px; height: 10px; border-radius: 2px; flex-shrink: 0; }}
+
+        #popup {{
+            position: absolute; z-index: 20;
+            background: rgba(10,10,10,0.95); border: 1px solid #444;
+            border-radius: 8px; padding: 12px 16px;
+            font-size: 12px; max-width: 240px;
+            backdrop-filter: blur(10px); display: none;
+        }}
+        #popup h3 {{ color: #FF6666; margin: 0 0 8px 0; font-size: 14px; }}
+        #popup .row {{ display: flex; justify-content: space-between; margin: 3px 0; }}
+        #popup .key {{ color: #888; }}
+        #popup .val {{ color: white; font-weight: bold; }}
+        #close-popup {{
+            position: absolute; top: 6px; right: 10px;
+            cursor: pointer; color: #888; font-size: 16px;
+        }}
+
+        .mapboxgl-ctrl-group {{ background: rgba(10,10,10,0.92) !important; }}
+        .mapboxgl-ctrl-group button {{ background: transparent !important; }}
+        .mapboxgl-ctrl-group button span {{ filter: invert(1); }}
+    </style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<div id="header">
+    <h1>&#127774; National All-Hazards Monitor</h1>
+    <p id="update-time">Loading live data...</p>
+</div>
+
+<div id="stats">
+    <div class="stat-card">
+        <div class="stat-value" id="stat-warnings" style="color:#FF6666">-</div>
+        <div class="stat-label">Active Warnings</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value" id="stat-eq" style="color:#AAD4FF">-</div>
+        <div class="stat-label">Earthquakes M2.5+</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value" id="stat-fires" style="color:#FF4500">-</div>
+        <div class="stat-label">Fire Detections</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value" id="stat-spc" style="color:#76FF7A">-</div>
+        <div class="stat-label">SPC Outlook Zones</div>
+    </div>
+</div>
+
+<div id="legend">
+    <div class="legend-section">
+        <h4>&#9889; NWS Warnings</h4>
+        <div class="legend-item"><div class="legend-box" style="background:#FF0000"></div> Tornado</div>
+        <div class="legend-item"><div class="legend-box" style="background:#FF6600"></div> Hurricane</div>
+        <div class="legend-item"><div class="legend-box" style="background:#FF6666"></div> Severe T-Storm</div>
+        <div class="legend-item"><div class="legend-box" style="background:#00BFFF"></div> Flash Flood</div>
+        <div class="legend-item"><div class="legend-box" style="background:#FFFF00"></div> Other</div>
+    </div>
+    <div class="legend-section">
+        <h4>&#9928; SPC Outlook</h4>
+        <div class="legend-item"><div class="legend-box" style="background:#76FF7A"></div> General Thunder</div>
+        <div class="legend-item"><div class="legend-box" style="background:#FFFF00"></div> Slight Risk</div>
+        <div class="legend-item"><div class="legend-box" style="background:#FF9900"></div> Enhanced Risk</div>
+        <div class="legend-item"><div class="legend-box" style="background:#FF0000"></div> Moderate Risk</div>
+    </div>
+    <div class="legend-section">
+        <h4>&#128308; Earthquakes</h4>
+        <div class="legend-item"><div class="legend-dot" style="background:#FFFF00"></div> M2.5 - 3.9</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#FF9900"></div> M4.0 - 4.9</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#FF0000"></div> M5.0+</div>
+        <h4 style="margin-top:8px">&#128293; Wildfires</h4>
+        <div class="legend-item"><div class="legend-dot" style="background:#FF4500"></div> NASA FIRMS</div>
+    </div>
+</div>
+
+<div id="popup">
+    <span id="close-popup" onclick="document.getElementById('popup').style.display='none'">&#x2715;</span>
+    <h3 id="popup-title">Feature</h3>
+    <div id="popup-content"></div>
+</div>
+
+<script>
+mapboxgl.accessToken = '{MAPBOX_TOKEN}';
+
+const HAZARD_COLORS = {{
+    'TO': '#FF0000', 'FF': '#00BFFF', 'HU': '#FF6600',
+    'TS': '#FF9900', 'SV': '#FF6666', 'WS': '#AAAAFF',
+    'FA': '#0099FF', 'FW': '#FF4500'
+}};
+const SPC_COLORS = {{
+    'TSTM': '#76FF7A', 'MRGL': '#009000', 'SLGT': '#FFFF00',
+    'ENH': '#FF9900', 'MDT': '#FF0000', 'HIGH': '#FF00FF'
+}};
+const PHENOM_NAMES = {{
+    'TO':'Tornado','SV':'Severe Thunderstorm','FF':'Flash Flood',
+    'FA':'Flood','HU':'Hurricane','TS':'Tropical Storm',
+    'WS':'Winter Storm','FW':'Fire Weather','EH':'Excessive Heat',
+    'HW':'High Wind','CF':'Coastal Flood','SS':'Storm Surge'
+}};
+
+const map = new mapboxgl.Map({{
+    container: 'map',
+    style: 'mapbox://styles/mapbox/dark-v11',
+    center: [-98.35, 39.5],
+    zoom: 3.5,
+    projection: 'globe'
+}});
+
+map.addControl(new mapboxgl.NavigationControl(), 'top-right');
+map.addControl(new mapboxgl.FullscreenControl(), 'top-right');
+map.setFog({{
+    color: 'rgb(10,10,10)',
+    'high-color': 'rgb(20,30,50)',
+    'horizon-blend': 0.02
+}});
+
+function showPopup(title, rows, e) {{
+    const popup = document.getElementById('popup');
+    document.getElementById('popup-title').textContent = title;
+    let html = '';
+    for (const [k, v] of Object.entries(rows)) {{
+        html += `<div class="row"><span class="key">${{k}}</span><span class="val">${{v}}</span></div>`;
+    }}
+    document.getElementById('popup-content').innerHTML = html;
+    popup.style.display = 'block';
+    popup.style.left = (e.point.x + 10) + 'px';
+    popup.style.top  = (e.point.y - 10) + 'px';
+}}
+
+map.on('load', () => {{
+
+    // ── SPC OUTLOOK ─────────────────────────────────
+    map.addSource('spc', {{ type: 'geojson', data: '/api/spc' }});
+    map.addLayer({{
+        id: 'spc-fill', type: 'fill', source: 'spc',
+        paint: {{
+            'fill-color': [
+                'match', ['get', 'LABEL'],
+                'TSTM', '#76FF7A', 'MRGL', '#009000',
+                'SLGT', '#FFFF00', 'ENH',  '#FF9900',
+                'MDT',  '#FF0000', 'HIGH', '#FF00FF',
+                '#76FF7A'
+            ],
+            'fill-opacity': 0.25
+        }}
+    }});
+    map.addLayer({{
+        id: 'spc-outline', type: 'line', source: 'spc',
+        paint: {{
+            'line-color': ['match', ['get', 'LABEL'],
+                'TSTM', '#76FF7A', 'MRGL', '#009000',
+                'SLGT', '#FFFF00', 'ENH',  '#FF9900',
+                'MDT',  '#FF0000', 'HIGH', '#FF00FF',
+                '#76FF7A'
+            ],
+            'line-width': 1.5,
+            'line-dasharray': [4, 4]
+        }}
+    }});
+
+    // ── NWS WARNINGS ────────────────────────────────
+    map.addSource('warnings', {{ type: 'geojson', data: '/api/warnings' }});
+    map.addLayer({{
+        id: 'warnings-fill', type: 'fill', source: 'warnings',
+        paint: {{
+            'fill-color': [
+                'match', ['get', 'phenom'],
+                'TO', '#FF0000', 'FF', '#00BFFF', 'HU', '#FF6600',
+                'TS', '#FF9900', 'SV', '#FF6666', 'WS', '#AAAAFF',
+                'FA', '#0099FF', 'FW', '#FF4500', '#FFFF00'
+            ],
+            'fill-opacity': 0.45
+        }}
+    }});
+    map.addLayer({{
+        id: 'warnings-outline', type: 'line', source: 'warnings',
+        paint: {{
+            'line-color': '#FFFFFF',
+            'line-width': 1,
+            'line-opacity': 0.6
+        }}
+    }});
+
+    // Warning pulse animation
+    let opacity = 0.45;
+    let direction = -1;
+    setInterval(() => {{
+        opacity += direction * 0.02;
+        if (opacity < 0.25 || opacity > 0.55) direction *= -1;
+        if (map.getLayer('warnings-fill')) {{
+            map.setPaintProperty('warnings-fill', 'fill-opacity', opacity);
+        }}
+    }}, 80);
+
+    // ── EARTHQUAKES ──────────────────────────────────
+    map.addSource('earthquakes', {{ type: 'geojson', data: '/api/earthquakes' }});
+    map.addLayer({{
+        id: 'eq-circles', type: 'circle', source: 'earthquakes',
+        paint: {{
+            'circle-color': [
+                'step', ['get', 'mag'],
+                '#FFFF00', 4, '#FF9900', 5, '#FF0000'
+            ],
+            'circle-radius': [
+                'interpolate', ['linear'], ['get', 'mag'],
+                2.5, 4, 4, 8, 6, 16, 8, 28
+            ],
+            'circle-opacity': 0.8,
+            'circle-stroke-color': '#FFFFFF',
+            'circle-stroke-width': 1.5
+        }}
+    }});
+
+    // ── WILDFIRES ────────────────────────────────────
+    map.addSource('fires', {{ type: 'geojson', data: '/api/fires',
+        cluster: true, clusterMaxZoom: 7, clusterRadius: 40
+    }});
+    map.addLayer({{
+        id: 'fire-clusters', type: 'circle', source: 'fires',
+        filter: ['has', 'point_count'],
+        paint: {{
+            'circle-color': [
+                'step', ['get', 'point_count'],
+                '#FF8C00', 25, '#FF4500', 100, '#FF0000'
+            ],
+            'circle-radius': [
+                'step', ['get', 'point_count'],
+                16, 25, 22, 100, 30
+            ],
+            'circle-stroke-color': '#FFD700',
+            'circle-stroke-width': 2
+        }}
+    }});
+    map.addLayer({{
+        id: 'fire-cluster-count', type: 'symbol', source: 'fires',
+        filter: ['has', 'point_count'],
+        layout: {{
+            'text-field': ['get', 'point_count_abbreviated'],
+            'text-size': 11, 'text-font': ['DIN Offc Pro Bold', 'Arial Unicode MS Bold']
+        }},
+        paint: {{ 'text-color': '#fff' }}
+    }});
+    map.addLayer({{
+        id: 'fire-points', type: 'circle', source: 'fires',
+        filter: ['!', ['has', 'point_count']],
+        paint: {{
+            'circle-color': [
+                'step', ['get', 'frp'],
+                '#FF8C00', 20, '#FF4500', 100, '#FF0000'
+            ],
+            'circle-radius': 5,
+            'circle-stroke-color': '#FFD700',
+            'circle-stroke-width': 1,
+            'circle-opacity': 0.8
+        }}
+    }});
+
+    // ── CLICK HANDLERS ───────────────────────────────
+    map.on('click', 'warnings-fill', (e) => {{
+        const p = e.features[0].properties;
+        const phenom = p.phenom || '';
+        const sig = {{'W':'Warning','A':'Watch','Y':'Advisory','S':'Statement'}}[p.sig] || p.sig || '';
+        const name = (PHENOM_NAMES[phenom] || phenom) + ' ' + sig;
+        showPopup('⚠ ' + name, {{
+            'Phenomenon': phenom,
+            'Significance': sig,
+            'WFO': p.wfo || 'N/A',
+            'Product': p.prod_type || 'N/A'
+        }}, e);
+    }});
+    map.on('click', 'eq-circles', (e) => {{
+        const p = e.features[0].properties;
+        showPopup('Earthquake M' + p.mag, {{
+            'Location': p.place || 'Unknown',
+            'Magnitude': p.mag,
+            'Depth': (p.depth || 'N/A') + ' km'
+        }}, e);
+    }});
+    map.on('click', 'fire-points', (e) => {{
+        const p = e.features[0].properties;
+        showPopup('Wildfire Detection', {{
+            'Date': p.acq_date || 'N/A',
+            'FRP': (p.frp || 'N/A') + ' MW',
+            'Confidence': p.confidence || 'N/A'
+        }}, e);
+    }});
+    map.on('click', 'fire-clusters', (e) => {{
+        map.flyTo({{ center: e.lngLat, zoom: map.getZoom() + 2 }});
+    }});
+
+    // Cursor changes
+    ['warnings-fill','eq-circles','fire-points','fire-clusters'].forEach(layer => {{
+        map.on('mouseenter', layer, () => map.getCanvas().style.cursor = 'pointer');
+        map.on('mouseleave', layer, () => map.getCanvas().style.cursor = '');
+    }});
+
+    // ── LOAD STATS ───────────────────────────────────
+    fetch('/api/summary').then(r => r.json()).then(data => {{
+        const s = data.summary || {{}};
+        document.getElementById('stat-warnings').textContent = s.warnings_count || 0;
+        document.getElementById('stat-eq').textContent       = s.earthquakes    || 0;
+        document.getElementById('stat-fires').textContent    = s.wildfires      || 0;
+        document.getElementById('stat-spc').textContent      = s.spc_zones      || 0;
+        document.getElementById('update-time').textContent   = 'Last updated: ' + (data.last_update || 'Loading...');
+    }});
+
+    // Auto-refresh stats every 5 min
+    setInterval(() => {{
+        fetch('/api/summary').then(r => r.json()).then(data => {{
+            const s = data.summary || {{}};
+            document.getElementById('stat-warnings').textContent = s.warnings_count || 0;
+            document.getElementById('stat-eq').textContent       = s.earthquakes    || 0;
+            document.getElementById('stat-fires').textContent    = s.wildfires      || 0;
+            document.getElementById('stat-spc').textContent      = s.spc_zones      || 0;
+            document.getElementById('update-time').textContent   = 'Last updated: ' + (data.last_update || '');
+            // Refresh map sources
+            ['warnings','spc','earthquakes','fires'].forEach(src => {{
+                if (map.getSource(src)) map.getSource(src).setData('/api/' + src + '?t=' + Date.now());
+            }});
+        }});
+    }}, 5 * 60 * 1000);
+}});
+</script>
+</body>
+</html>"""
+    return html
+
 app.layout = html.Div(
     style={"backgroundColor": "#0a0a0a", "minHeight": "100vh",
            "fontFamily": "Arial, sans-serif", "color": "white"},
@@ -612,8 +1063,11 @@ app.layout = html.Div(
             html.Div([
                 html.H1("🌪 National All-Hazards Monitor",
                     style={"margin": "0", "fontSize": "22px", "color": "#AAD4FF"}),
-                html.P("Real-time hazard tracking | NWS · NHC · SPC · USGS · NASA · Census",
-                    style={"margin": "4px 0 0 0", "fontSize": "11px", "color": "#888"})
+                html.P([
+                    "Real-time hazard tracking | NWS · NHC · SPC · USGS · NASA · Census  ",
+                    html.A("🗺 Open Mapbox Map →", href="/mapbox", target="_blank",
+                           style={"color": "#AAD4FF", "fontSize": "11px", "textDecoration": "none"})
+                ], style={"margin": "4px 0 0 0", "fontSize": "11px", "color": "#888"})
             ]),
             html.Div([
                 html.P(id="last-updated", style={"margin": "0", "fontSize": "12px",
