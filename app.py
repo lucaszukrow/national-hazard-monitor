@@ -1077,31 +1077,44 @@ map.on('load', () => {{
         map.on('mouseleave', layer, () => map.getCanvas().style.cursor = '');
     }});
 
-    // ── LOAD STATS ───────────────────────────────────
-    fetch('/api/summary').then(r => r.json()).then(data => {{
-        const s = data.summary || {{}};
-        document.getElementById('stat-warnings').textContent = s.warnings_count || 0;
-        document.getElementById('stat-eq').textContent       = s.earthquakes    || 0;
-        document.getElementById('stat-fires').textContent    = s.wildfires      || 0;
-        document.getElementById('stat-spc').textContent      = s.spc_zones      || 0;
-        document.getElementById('update-time').textContent   = 'Last updated: ' + (data.last_update || 'Loading...');
-    }});
-
-    // Auto-refresh stats every 5 min
-    setInterval(() => {{
+    // ── LOAD STATS WITH RETRY ────────────────────────
+    function loadData() {{
         fetch('/api/summary').then(r => r.json()).then(data => {{
             const s = data.summary || {{}};
+            const hasData = (s.warnings_count > 0 || s.earthquakes > 0 || s.wildfires > 0);
+            
             document.getElementById('stat-warnings').textContent = s.warnings_count || 0;
             document.getElementById('stat-eq').textContent       = s.earthquakes    || 0;
             document.getElementById('stat-fires').textContent    = s.wildfires      || 0;
             document.getElementById('stat-spc').textContent      = s.spc_zones      || 0;
-            document.getElementById('update-time').textContent   = 'Last updated: ' + (data.last_update || '');
-            // Refresh map sources
+            
+            if (data.last_update && data.last_update !== 'Never') {{
+                document.getElementById('update-time').textContent = 'Last updated: ' + data.last_update;
+            }} else {{
+                document.getElementById('update-time').textContent = 'Downloading live data...';
+            }}
+
+            // Refresh all map sources with fresh data
             ['warnings','spc','earthquakes','fires'].forEach(src => {{
-                if (map.getSource(src)) map.getSource(src).setData('/api/' + src + '?t=' + Date.now());
+                if (map.getSource(src)) {{
+                    map.getSource(src).setData('/api/' + src + '?t=' + Date.now());
+                }}
             }});
+
+            // If no data yet retry in 10 seconds
+            if (!hasData) {{
+                console.log('No data yet, retrying in 10s...');
+                setTimeout(loadData, 10000);
+            }}
+        }}).catch(err => {{
+            console.log('Fetch failed, retrying in 10s...', err);
+            setTimeout(loadData, 10000);
         }});
-    }}, 5 * 60 * 1000);
+    }}
+
+    // Load immediately then every 5 minutes
+    loadData();
+    setInterval(loadData, 5 * 60 * 1000);
 }});
 </script>
 </body>
