@@ -1048,17 +1048,26 @@ function setupLayers() {{
             'Product': p.prod_type || 'N/A'
         }}, e);
     }});
+    map.on('click', 'spc-fill', (e) => {{
+        const p = e.features[0].properties;
+        const labels = {{'TSTM':'General Thunder','MRGL':'Marginal Risk','SLGT':'Slight Risk','ENH':'Enhanced Risk','MDT':'Moderate Risk','HIGH':'High Risk'}};
+        showPopup('⛈ SPC Convective Outlook', {{
+            'Risk Level': labels[p.LABEL] || p.LABEL || 'N/A',
+            'Label': p.LABEL2 || p.LABEL || 'N/A'
+        }}, e);
+    }});
     map.on('click', 'eq-circles', (e) => {{
         const p = e.features[0].properties;
-        showPopup('Earthquake M' + p.mag, {{
+        showPopup('🔴 Earthquake M' + p.mag, {{
             'Location': p.place || 'Unknown',
             'Magnitude': p.mag,
-            'Depth': (p.depth || 'N/A') + ' km'
+            'Depth': (p.depth || 'N/A') + ' km',
+            'Time': p.time ? new Date(p.time).toLocaleString() : 'N/A'
         }}, e);
     }});
     map.on('click', 'fire-points', (e) => {{
         const p = e.features[0].properties;
-        showPopup('Wildfire Detection', {{
+        showPopup('🔥 Wildfire Detection', {{
             'Date': p.acq_date || 'N/A',
             'FRP': (p.frp || 'N/A') + ' MW',
             'Confidence': p.confidence || 'N/A'
@@ -1068,11 +1077,63 @@ function setupLayers() {{
         map.flyTo({{ center: e.lngLat, zoom: map.getZoom() + 2 }});
     }});
 
-    // Cursor changes
-    ['warnings-fill','eq-circles','fire-points','fire-clusters'].forEach(layer => {{
+    // Cursor changes for all clickable layers
+    ['warnings-fill','spc-fill','eq-circles','fire-points','fire-clusters'].forEach(layer => {{
         map.on('mouseenter', layer, () => map.getCanvas().style.cursor = 'pointer');
         map.on('mouseleave', layer, () => map.getCanvas().style.cursor = '');
     }});
+
+    // ── NEXRAD RADAR (Live) ──────────────────────────
+    map.addSource('nexrad', {{
+        type: 'raster',
+        tiles: ['https://mesonet.agron.iastate.edu/cgi-bin/wms/nexrad/n0r.cgi?SERVICE=WMS&REQUEST=GetMap&VERSION=1.1.1&LAYERS=nexrad-n0r&STYLES=&FORMAT=image/png&TRANSPARENT=TRUE&HEIGHT=256&WIDTH=256&SRS=EPSG:3857&BBOX={{bbox-epsg-3857}}'],
+        tileSize: 256,
+        attribution: 'Iowa State Mesonet'
+    }});
+    map.addLayer({{
+        id: 'nexrad-layer',
+        type: 'raster',
+        source: 'nexrad',
+        paint: {{ 'raster-opacity': 0.7 }}
+    }});
+
+    // ── GOES INFRARED (Live) ─────────────────────────
+    map.addSource('goes-ir', {{
+        type: 'raster',
+        tiles: ['https://mesonet.agron.iastate.edu/cgi-bin/wms/goes/conus_ir.cgi?SERVICE=WMS&REQUEST=GetMap&VERSION=1.1.1&LAYERS=goes_conus_ir&STYLES=&FORMAT=image/png&TRANSPARENT=TRUE&HEIGHT=256&WIDTH=256&SRS=EPSG:3857&BBOX={{bbox-epsg-3857}}'],
+        tileSize: 256,
+        attribution: 'Iowa State Mesonet'
+    }});
+    map.addLayer({{
+        id: 'goes-ir-layer',
+        type: 'raster',
+        source: 'goes-ir',
+        paint: {{ 'raster-opacity': 0.6 }},
+        layout: {{ 'visibility': 'none' }}
+    }});
+
+    // ── LAYER TOGGLE BUTTONS ─────────────────────────
+    // Add toggle buttons for radar and satellite
+    const toggleContainer = document.createElement('div');
+    toggleContainer.style.cssText = 'position:absolute;top:200px;right:16px;z-index:10;display:flex;flex-direction:column;gap:6px;';
+
+    function makeToggle(label, layerId, defaultOn) {{
+        const btn = document.createElement('button');
+        btn.textContent = (defaultOn ? '✅ ' : '⬜ ') + label;
+        btn.style.cssText = 'background:rgba(10,10,10,0.9);color:white;border:1px solid #444;border-radius:6px;padding:6px 10px;cursor:pointer;font-size:11px;text-align:left;';
+        let on = defaultOn;
+        btn.onclick = () => {{
+            on = !on;
+            map.setLayoutProperty(layerId, 'visibility', on ? 'visible' : 'none');
+            btn.textContent = (on ? '✅ ' : '⬜ ') + label;
+        }};
+        return btn;
+    }}
+
+    toggleContainer.appendChild(makeToggle('NEXRAD Radar', 'nexrad-layer', true));
+    toggleContainer.appendChild(makeToggle('GOES Infrared', 'goes-ir-layer', false));
+    document.body.appendChild(toggleContainer);
+
 
     // ── LOAD STATS WITH RETRY ────────────────────────
     function loadData() {{
