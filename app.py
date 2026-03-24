@@ -730,6 +730,112 @@ def api_summary():
         headers={"Access-Control-Allow-Origin": "*"}
     )
 
+@app.server.route("/api/counties")
+def api_counties():
+    """Returns affected counties as GeoJSON with population data."""
+    affected = state["summary"].get("affected_counties", [])
+    counties_geojson = state.get("counties_geojson")
+    if not counties_geojson or not affected:
+        return flask_module.Response(
+            json.dumps({"type": "FeatureCollection", "features": []}),
+            mimetype="application/json",
+            headers={"Access-Control-Allow-Origin": "*"}
+        )
+    affected_fips = {c["fips"]: c for c in affected}
+    features = []
+    for feat in counties_geojson.get("features", []):
+        fips = feat.get("id", "")
+        if fips in affected_fips:
+            county_data = affected_fips[fips]
+            feat_copy = dict(feat)
+            feat_copy["properties"] = {
+                "fips":       fips,
+                "county":     county_data.get("county", ""),
+                "state":      county_data.get("state", ""),
+                "population": county_data.get("population", 0),
+                "event":      county_data.get("event", ""),
+                "sig":        county_data.get("sig", ""),
+                "phenom":     county_data.get("phenom", "")
+            }
+            features.append(feat_copy)
+    return flask_module.Response(
+        json.dumps({"type": "FeatureCollection", "features": features}),
+        mimetype="application/json",
+        headers={"Access-Control-Allow-Origin": "*"}
+    )
+
+@app.server.route("/api/infrastructure")
+def api_infrastructure():
+    """Returns infrastructure points as GeoJSON with type labels."""
+    features = []
+    # Fetch infrastructure from OpenStreetMap Overpass API
+    infra_queries = {
+        "hospital":     '[out:json][timeout:25];node["amenity"="hospital"](-125,24,-66,50);out body;',
+        "fire_station": '[out:json][timeout:25];node["amenity"="fire_station"](-125,24,-66,50);out body;',
+        "power_plant":  '[out:json][timeout:25];node["power"="plant"](-125,24,-66,50);out body;',
+        "school":       '[out:json][timeout:25];node["amenity"="school"](-125,24,-66,50);out body;'
+    }
+    infra_colors = {
+        "hospital":     "#FF0066",
+        "fire_station": "#FF4400",
+        "power_plant":  "#FFD700",
+        "school":       "#00FF88"
+    }
+    infra_icons = {
+        "hospital":     "🏥",
+        "fire_station": "🚒",
+        "power_plant":  "⚡",
+        "school":       "🏫"
+    }
+
+    # Check if we have cached infrastructure in state
+    cached_infra = state.get("infrastructure_cache", {})
+
+    for infra_type, query in infra_queries.items():
+        if infra_type in cached_infra:
+            items = cached_infra[infra_type]
+        else:
+            try:
+                r = requests.post(
+                    "https://overpass-api.de/api/interpreter",
+                    data={"data": query}, timeout=20
+                )
+                items = r.json().get("elements", [])
+                if not state.get("infrastructure_cache"):
+                    state["infrastructure_cache"] = {}
+                state["infrastructure_cache"][infra_type] = items
+            except Exception:
+                items = []
+
+        # Check if this infrastructure is inside a warning zone
+        warning_bounds = get_warning_bounds(state["warnings"])
+
+        for item in items[:5000]:  # Limit for performance
+            lat = item.get("lat")
+            lon = item.get("lon")
+            if not lat or not lon:
+                continue
+            at_risk = any(
+                point_in_bbox(lon, lat, b) for b in warning_bounds
+            )
+            features.append({
+                "type": "Feature",
+                "geometry": {"type": "Point", "coordinates": [lon, lat]},
+                "properties": {
+                    "type":    infra_type,
+                    "name":    item.get("tags", {}).get("name", infra_type.replace("_", " ").title()),
+                    "color":   infra_colors[infra_type],
+                    "icon":    infra_icons[infra_type],
+                    "at_risk": at_risk
+                }
+            })
+
+    return flask_module.Response(
+        json.dumps({"type": "FeatureCollection", "features": features}),
+        mimetype="application/json",
+        headers={"Access-Control-Allow-Origin": "*"}
+    )
+
 @app.server.route("/mapbox")
 def mapbox_map():
     """Serves the full Mapbox GL JS map page."""
@@ -956,6 +1062,16 @@ def mapbox_map():
         <div class="stat-label">SPC Outlook Zones</div>
         <div class="stat-icon">⛈</div>
     </div>
+    <div class="stat-card" style="--accent: rgba(255,150,0,0.6)">
+        <div class="stat-value" id="stat-counties" style="color:#FF9600">—</div>
+        <div class="stat-label">Affected Counties</div>
+        <div class="stat-icon">📍</div>
+    </div>
+    <div class="stat-card" style="--accent: rgba(200,100,255,0.6)">
+        <div class="stat-value" id="stat-pop" style="color:#CC64FF">—</div>
+        <div class="stat-label">Population at Risk</div>
+        <div class="stat-icon">👥</div>
+    </div>
 </div>
 
 <!-- Legend -->
@@ -982,6 +1098,17 @@ def mapbox_map():
         <div class="legend-item"><div class="legend-dot" style="background:#FF0000;color:#FF0000"></div>M5.0+</div>
         <div class="legend-title" style="margin-top:10px">🔥 Wildfires</div>
         <div class="legend-item"><div class="legend-dot" style="background:#FF4500;color:#FF4500"></div>NASA FIRMS</div>
+    </div>
+    <div class="legend-section">
+        <div class="legend-title">🏗 Infrastructure</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#FF0066;color:#FF0066"></div>Hospital</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#FF4400;color:#FF4400"></div>Fire Station</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#FFD700;color:#FFD700"></div>Power Plant</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#00FF88;color:#00FF88"></div>School</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#FF0000;color:#FF0000"></div>⚠ At Risk</div>
+        <div class="legend-title" style="margin-top:10px">📍 Counties</div>
+        <div class="legend-item"><div class="legend-box" style="background:rgba(255,100,0,0.4);color:#FF6400"></div>Low Pop</div>
+        <div class="legend-item"><div class="legend-box" style="background:rgba(255,0,0,0.6);color:#FF0000"></div>High Pop</div>
     </div>
 </div>
 
@@ -1217,7 +1344,107 @@ function setupLayers() {{
         map.on('mouseleave', layer, () => map.getCanvas().style.cursor = '');
     }});
 
-    // ── NEXRAD RADAR (Live) ──────────────────────────
+    // ── AFFECTED COUNTIES ────────────────────────────
+    map.addSource('counties', {{ type: 'geojson', data: '/api/counties' }});
+    map.addLayer({{
+        id: 'counties-fill', type: 'fill', source: 'counties',
+        paint: {{
+            'fill-color': [
+                'interpolate', ['linear'],
+                ['get', 'population'],
+                0,       'rgba(255,100,0,0.1)',
+                50000,   'rgba(255,100,0,0.25)',
+                200000,  'rgba(255,80,0,0.4)',
+                500000,  'rgba(255,50,0,0.55)',
+                1000000, 'rgba(255,0,0,0.7)'
+            ],
+            'fill-opacity': 0.7
+        }}
+    }});
+    map.addLayer({{
+        id: 'counties-outline', type: 'line', source: 'counties',
+        paint: {{
+            'line-color': '#FF6600',
+            'line-width': 1.5,
+            'line-opacity': 0.8
+        }}
+    }});
+    map.on('click', 'counties-fill', (e) => {{
+        const p = e.features[0].properties;
+        showPopup('📍 ' + p.county + ', ' + p.state, {{
+            'Population': Number(p.population).toLocaleString(),
+            'Event': p.event || 'N/A',
+            'Alert Level': p.sig || 'N/A',
+            'FIPS': p.fips || 'N/A'
+        }}, e);
+    }});
+    map.on('mouseenter', 'counties-fill', () => map.getCanvas().style.cursor = 'pointer');
+    map.on('mouseleave', 'counties-fill', () => map.getCanvas().style.cursor = '');
+
+    // ── INFRASTRUCTURE ────────────────────────────────
+    map.addSource('infrastructure', {{ type: 'geojson', data: '/api/infrastructure' }});
+
+    // At-risk infrastructure — glowing red
+    map.addLayer({{
+        id: 'infra-at-risk', type: 'circle', source: 'infrastructure',
+        filter: ['==', ['get', 'at_risk'], true],
+        paint: {{
+            'circle-color': '#FF0000',
+            'circle-radius': 7,
+            'circle-stroke-color': '#FF6666',
+            'circle-stroke-width': 2,
+            'circle-opacity': 0.9
+        }}
+    }});
+
+    // Normal infrastructure
+    map.addLayer({{
+        id: 'infra-normal', type: 'circle', source: 'infrastructure',
+        filter: ['==', ['get', 'at_risk'], false],
+        paint: {{
+            'circle-color': ['get', 'color'],
+            'circle-radius': 4,
+            'circle-stroke-color': 'rgba(255,255,255,0.3)',
+            'circle-stroke-width': 1,
+            'circle-opacity': 0.7
+        }}
+    }});
+
+    // Infrastructure labels
+    map.addLayer({{
+        id: 'infra-labels', type: 'symbol', source: 'infrastructure',
+        layout: {{
+            'text-field': ['get', 'name'],
+            'text-size': 9,
+            'text-offset': [0, 1.2],
+            'text-anchor': 'top',
+            'visibility': 'none'
+        }},
+        paint: {{
+            'text-color': 'white',
+            'text-halo-color': 'rgba(0,0,0,0.8)',
+            'text-halo-width': 1
+        }}
+    }});
+
+    map.on('click', 'infra-at-risk', (e) => {{
+        const p = e.features[0].properties;
+        showPopup(p.icon + ' ' + p.name, {{
+            'Type': p.type.replace('_', ' ').toUpperCase(),
+            'Status': '⚠ AT RISK — inside warning zone',
+        }}, e);
+    }});
+    map.on('click', 'infra-normal', (e) => {{
+        const p = e.features[0].properties;
+        showPopup(p.icon + ' ' + p.name, {{
+            'Type': p.type.replace('_', ' ').toUpperCase(),
+            'Status': '✅ Not currently at risk',
+        }}, e);
+    }});
+    ['infra-at-risk', 'infra-normal'].forEach(layer => {{
+        map.on('mouseenter', layer, () => map.getCanvas().style.cursor = 'pointer');
+        map.on('mouseleave', layer, () => map.getCanvas().style.cursor = '');
+    }});
     map.addSource('nexrad', {{
         type: 'raster',
         tiles: ['https://mesonet.agron.iastate.edu/cgi-bin/wms/nexrad/n0r.cgi?SERVICE=WMS&REQUEST=GetMap&VERSION=1.1.1&LAYERS=nexrad-n0r&STYLES=&FORMAT=image/png&TRANSPARENT=TRUE&HEIGHT=256&WIDTH=256&SRS=EPSG:3857&BBOX={{bbox-epsg-3857}}'],
@@ -1266,6 +1493,10 @@ function setupLayers() {{
 
     toggleContainer.appendChild(makeToggle('NEXRAD Radar', 'nexrad-layer', true));
     toggleContainer.appendChild(makeToggle('GOES Infrared', 'goes-ir-layer', false));
+    toggleContainer.appendChild(makeToggle('Affected Counties', 'counties-fill', true));
+    toggleContainer.appendChild(makeToggle('🏥 Hospitals', 'infra-normal', true));
+    toggleContainer.appendChild(makeToggle('⚠ At-Risk Infra', 'infra-at-risk', true));
+    toggleContainer.appendChild(makeToggle('🏷 Infra Labels', 'infra-labels', false));
     document.body.appendChild(toggleContainer);
 
 
@@ -1279,6 +1510,15 @@ function setupLayers() {{
             document.getElementById('stat-eq').textContent       = s.earthquakes    || 0;
             document.getElementById('stat-fires').textContent    = s.wildfires      || 0;
             document.getElementById('stat-spc').textContent      = s.spc_zones      || 0;
+            if (document.getElementById('stat-counties')) {{
+                document.getElementById('stat-counties').textContent = s.counties_count || 0;
+            }}
+            if (document.getElementById('stat-pop')) {{
+                const pop = s.total_population || 0;
+                document.getElementById('stat-pop').textContent = pop > 1000000
+                    ? (pop/1000000).toFixed(1) + 'M'
+                    : pop > 1000 ? (pop/1000).toFixed(0) + 'K' : pop;
+            }}
             
             if (data.last_update && data.last_update !== 'Never') {{
                 document.getElementById('update-time').textContent = 'LAST UPDATED: ' + data.last_update;
@@ -1288,7 +1528,7 @@ function setupLayers() {{
 
             // Refresh all map sources with fresh data
             if (map.loaded()) {{
-                ['warnings','spc','earthquakes','fires'].forEach(src => {{
+                ['warnings','spc','earthquakes','fires','counties','infrastructure'].forEach(src => {{
                     if (map.getSource(src)) {{
                         map.getSource(src).setData('/api/' + src + '?t=' + Date.now());
                     }}
