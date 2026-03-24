@@ -740,8 +740,8 @@ def mapbox_map():
     <meta charset="utf-8">
     <title>National Hazard Monitor</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <script src="https://api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.js"></script>
-    <link href="https://api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.css" rel="stylesheet">
+    <script src="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.js"></script>
+    <link href="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.css" rel="stylesheet">
     <style>
         * {{ margin: 0; padding: 0; box-sizing: border-box; }}
         body {{ background: #0a0a0a; font-family: Arial, sans-serif; color: white; }}
@@ -885,17 +885,11 @@ const map = new mapboxgl.Map({{
     container: 'map',
     style: 'mapbox://styles/mapbox/dark-v11',
     center: [-98.35, 39.5],
-    zoom: 3.5,
-    projection: 'globe'
+    zoom: 3.5
 }});
 
 map.addControl(new mapboxgl.NavigationControl(), 'top-right');
 map.addControl(new mapboxgl.FullscreenControl(), 'top-right');
-map.setFog({{
-    color: 'rgb(10,10,10)',
-    'high-color': 'rgb(20,30,50)',
-    'horizon-blend': 0.02
-}});
 
 function showPopup(title, rows, e) {{
     const popup = document.getElementById('popup');
