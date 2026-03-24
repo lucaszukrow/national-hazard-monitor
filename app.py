@@ -130,6 +130,18 @@ state = {
     "updating": False
 }
 
+# Load cache at module level — runs when gunicorn imports app
+# This ensures data is available immediately on startup
+_startup_cache = load_cache()
+if _startup_cache:
+    state.update(_startup_cache)
+    print(f"Startup: loaded cache from {_startup_cache.get('last_update', 'unknown')}")
+
+# Start background update thread at module level
+# Runs when gunicorn imports the app — not just when run directly
+_update_thread = threading.Thread(target=lambda: schedule_updates(30), daemon=True)
+_update_thread.start()
+
 # ─────────────────────────────────────────────
 # DATA DOWNLOAD FUNCTIONS
 # ─────────────────────────────────────────────
