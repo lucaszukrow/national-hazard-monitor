@@ -910,6 +910,12 @@ function showPopup(title, rows, e) {{
     popup.style.top  = (e.point.y - 10) + 'px';
 }}
 
+function initLayers() {{
+    if (!map.isStyleLoaded()) {{
+        setTimeout(initLayers, 100);
+        return;
+    }}
+
 map.on('load', () => {{
 
     // ── SPC OUTLOOK ─────────────────────────────────
@@ -1095,11 +1101,13 @@ map.on('load', () => {{
             }}
 
             // Refresh all map sources with fresh data
-            ['warnings','spc','earthquakes','fires'].forEach(src => {{
-                if (map.getSource(src)) {{
-                    map.getSource(src).setData('/api/' + src + '?t=' + Date.now());
-                }}
-            }});
+            if (map.loaded()) {{
+                ['warnings','spc','earthquakes','fires'].forEach(src => {{
+                    if (map.getSource(src)) {{
+                        map.getSource(src).setData('/api/' + src + '?t=' + Date.now());
+                    }}
+                }});
+            }}
 
             // If no data yet retry in 10 seconds
             if (!hasData) {{
@@ -1115,11 +1123,29 @@ map.on('load', () => {{
     // Load immediately then every 5 minutes
     loadData();
     setInterval(loadData, 5 * 60 * 1000);
-}});
+    }});
+
+// Wait for style to fully load before initializing layers
+if (map.isStyleLoaded()) {{
+    initLayers();
+}} else {{
+    map.on('styledata', function() {{
+        if (map.isStyleLoaded()) initLayers();
+    }});
+}}
 </script>
 </body>
 </html>"""
-    return html
+    response = flask_module.make_response(html)
+    response.headers["Content-Security-Policy"] = (
+        "default-src * 'unsafe-inline' 'unsafe-eval' data: blob:; "
+        "script-src * 'unsafe-inline' 'unsafe-eval' blob:; "
+        "style-src * 'unsafe-inline'; "
+        "img-src * data: blob:; "
+        "connect-src *; "
+        "worker-src blob: *;"
+    )
+    return response
 
 app.layout = html.Div(
     style={"backgroundColor": "#0a0a0a", "minHeight": "100vh",
@@ -1236,7 +1262,16 @@ def update_ui(n):
     pop = s.get("total_population", 0)
 
     def card(value, label, color="#AAD4FF", bg="#1B2A3A"):
-        return html.Div(style={
+        response = flask_module.make_response(html)
+    response.headers["Content-Security-Policy"] = (
+        "default-src * 'unsafe-inline' 'unsafe-eval' data: blob:; "
+        "script-src * 'unsafe-inline' 'unsafe-eval' blob:; "
+        "style-src * 'unsafe-inline'; "
+        "img-src * data: blob:; "
+        "connect-src *; "
+        "worker-src blob: *;"
+    )
+    return response.Div(style={
             "backgroundColor": bg, "borderRadius": "8px",
             "padding": "14px 18px", "minWidth": "130px", "flex": "1",
             "border": f"1px solid {color}22"
