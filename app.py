@@ -137,10 +137,7 @@ if _startup_cache:
     state.update(_startup_cache)
     print(f"Startup: loaded cache from {_startup_cache.get('last_update', 'unknown')}")
 
-# Start background update thread at module level
-# Runs when gunicorn imports the app — not just when run directly
-_update_thread = threading.Thread(target=lambda: schedule_updates(30), daemon=True)
-_update_thread.start()
+
 
 # ─────────────────────────────────────────────
 # DATA DOWNLOAD FUNCTIONS
@@ -646,6 +643,19 @@ def schedule_updates(interval_minutes=30):
 # ─────────────────────────────────────────────
 app = dash.Dash(__name__, title="National Hazard Monitor", update_title=None)
 server = app.server  # Expose Flask server for Render
+
+# Use Flask's before_first_request to start background thread
+# This runs once when the first request hits the server
+_started = False
+
+@server.before_request
+def start_background_on_first_request():
+    global _started
+    if not _started:
+        _started = True
+        print("First request — starting background update thread...")
+        t = threading.Thread(target=lambda: schedule_updates(30), daemon=True)
+        t.start()
 
 # ─────────────────────────────────────────────
 # FLASK API ENDPOINTS
