@@ -77,6 +77,33 @@ state_fips = {
 }
 
 # ─────────────────────────────────────────────
+# CACHE FILE — persists data across restarts
+# ─────────────────────────────────────────────
+CACHE_FILE = "/tmp/hazard_cache.json"
+
+def save_cache(data):
+    """Save state to file so it survives restarts."""
+    try:
+        with open(CACHE_FILE, "w") as f:
+            json.dump(data, f)
+    except Exception as e:
+        print(f"Cache save failed: {e}")
+
+def load_cache():
+    """Load cached state from file."""
+    try:
+        if os.path.exists(CACHE_FILE):
+            age = time.time() - os.path.getmtime(CACHE_FILE)
+            if age < 3600:  # Use cache if less than 1 hour old
+                with open(CACHE_FILE, "r") as f:
+                    data = json.load(f)
+                print(f"  Loaded cache ({int(age/60)} min old)")
+                return data
+    except Exception as e:
+        print(f"Cache load failed: {e}")
+    return None
+
+# ─────────────────────────────────────────────
 # GLOBAL STATE — shared between update thread
 # and Dash callbacks
 # ─────────────────────────────────────────────
@@ -571,6 +598,17 @@ def run_update():
             }
         })
         print(f"  Update complete — {len(affected)} counties affected")
+        # Save to cache file so data survives restarts
+        save_cache({
+            "last_update": state["last_update"],
+            "warnings":    state["warnings"],
+            "spc":         state["spc"],
+            "earthquakes": state["earthquakes"],
+            "fires":       state["fires"],
+            "summary":     state["summary"],
+            "map_html":    state["map_html"]
+        })
+        print("  Cache saved")
 
     except Exception as e:
         print(f"  ERROR during update: {e}")
@@ -1287,6 +1325,11 @@ if __name__ == "__main__":
     print("  NATIONAL HAZARD MONITOR")
     print("  Starting background data update...")
     print("="*50)
+    # Load cached data immediately so map works before first update
+    cached = load_cache()
+    if cached:
+        state.update(cached)
+        print("  Loaded cached data from previous run")
     schedule_updates(interval_minutes=30)
     port = int(os.environ.get("PORT", 8050))
     app.run(host="0.0.0.0", port=port, debug=False)
