@@ -1262,16 +1262,7 @@ def update_ui(n):
     pop = s.get("total_population", 0)
 
     def card(value, label, color="#AAD4FF", bg="#1B2A3A"):
-        response = flask_module.make_response(html)
-    response.headers["Content-Security-Policy"] = (
-        "default-src * 'unsafe-inline' 'unsafe-eval' data: blob:; "
-        "script-src * 'unsafe-inline' 'unsafe-eval' blob:; "
-        "style-src * 'unsafe-inline'; "
-        "img-src * data: blob:; "
-        "connect-src *; "
-        "worker-src blob: *;"
-    )
-    return response.Div(style={
+        return html.Div(style={
             "backgroundColor": bg, "borderRadius": "8px",
             "padding": "14px 18px", "minWidth": "130px", "flex": "1",
             "border": f"1px solid {color}22"
