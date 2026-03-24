@@ -910,12 +910,6 @@ function showPopup(title, rows, e) {{
     popup.style.top  = (e.point.y - 10) + 'px';
 }}
 
-function initLayers() {{
-    if (!map.isStyleLoaded()) {{
-        setTimeout(initLayers, 100);
-        return;
-    }}
-
 map.on('load', () => {{
 
     // ── SPC OUTLOOK ─────────────────────────────────
@@ -1048,7 +1042,8 @@ map.on('load', () => {{
     map.on('click', 'warnings-fill', (e) => {{
         const p = e.features[0].properties;
         const phenom = p.phenom || '';
-        const sig = {{'W':'Warning','A':'Watch','Y':'Advisory','S':'Statement'}}[p.sig] || p.sig || '';
+        const sigMap = {{'W':'Warning','A':'Watch','Y':'Advisory','S':'Statement'}};
+        const sig = sigMap[p.sig] || p.sig || '';
         const name = (PHENOM_NAMES[phenom] || phenom) + ' ' + sig;
         showPopup('⚠ ' + name, {{
             'Phenomenon': phenom,
@@ -1123,16 +1118,7 @@ map.on('load', () => {{
     // Load immediately then every 5 minutes
     loadData();
     setInterval(loadData, 5 * 60 * 1000);
-    }});
-
-// Wait for style to fully load before initializing layers
-if (map.isStyleLoaded()) {{
-    initLayers();
-}} else {{
-    map.on('styledata', function() {{
-        if (map.isStyleLoaded()) initLayers();
-    }});
-}}
+}});
 </script>
 </body>
 </html>"""
