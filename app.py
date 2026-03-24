@@ -910,7 +910,9 @@ function showPopup(title, rows, e) {{
     popup.style.top  = (e.point.y - 10) + 'px';
 }}
 
-map.on('load', () => {{
+function setupLayers() {{
+    // Guard: don't add sources if already added
+    if (map.getSource('warnings')) return;
 
     // ── SPC OUTLOOK ─────────────────────────────────
     map.addSource('spc', {{ type: 'geojson', data: '/api/spc' }});
@@ -1118,6 +1120,11 @@ map.on('load', () => {{
     // Load immediately then every 5 minutes
     loadData();
     setInterval(loadData, 5 * 60 * 1000);
+}}
+
+// Use exact Mapbox recommended pattern
+map.on('load', function() {{
+    setupLayers();
 }});
 </script>
 </body>
