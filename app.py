@@ -742,123 +742,255 @@ def mapbox_map():
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <script src="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.js"></script>
     <link href="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
     <style>
         * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-        body {{ background: #0a0a0a; font-family: Arial, sans-serif; color: white; }}
+        body {{ background: #000; font-family: 'Inter', Arial, sans-serif; color: white; overflow: hidden; }}
         #map {{ position: absolute; top: 0; bottom: 0; width: 100%; }}
 
-        #header {{
-            position: absolute; top: 16px; left: 50%; transform: translateX(-50%);
-            z-index: 10; background: rgba(10,10,10,0.92);
-            border: 1px solid #1B4F72; border-radius: 10px;
-            padding: 10px 24px; text-align: center;
-            backdrop-filter: blur(10px);
+        /* ── SCAN LINE OVERLAY ── */
+        body::after {{
+            content: '';
+            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.03) 2px, rgba(0,0,0,0.03) 4px);
+            pointer-events: none; z-index: 5;
         }}
-        #header h1 {{ font-size: 18px; color: #AAD4FF; margin: 0; }}
-        #header p  {{ font-size: 11px; color: #666; margin: 4px 0 0 0; }}
 
+        /* ── HEADER ── */
+        #header {{
+            position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
+            z-index: 10;
+            background: linear-gradient(135deg, rgba(0,8,20,0.95) 0%, rgba(0,20,40,0.95) 100%);
+            border: 1px solid rgba(0,180,255,0.3);
+            border-radius: 12px;
+            padding: 12px 28px;
+            text-align: center;
+            backdrop-filter: blur(20px);
+            box-shadow: 0 0 30px rgba(0,180,255,0.15), inset 0 1px 0 rgba(255,255,255,0.05);
+        }}
+        #header::before {{
+            content: '';
+            position: absolute; top: -1px; left: 20%; right: 20%; height: 1px;
+            background: linear-gradient(90deg, transparent, rgba(0,180,255,0.8), transparent);
+        }}
+        #header h1 {{
+            font-size: 17px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase;
+            background: linear-gradient(135deg, #AAD4FF, #00B4FF);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+            margin: 0;
+        }}
+        #header p {{ font-size: 10px; color: rgba(100,180,255,0.6); margin: 4px 0 0 0; letter-spacing: 1px; }}
+
+        /* ── LIVE INDICATOR ── */
+        #live-dot {{
+            display: inline-block; width: 8px; height: 8px; background: #00FF88;
+            border-radius: 50%; margin-right: 6px;
+            box-shadow: 0 0 8px #00FF88;
+            animation: pulse-dot 1.5s ease-in-out infinite;
+        }}
+        @keyframes pulse-dot {{
+            0%, 100% {{ opacity: 1; box-shadow: 0 0 8px #00FF88; }}
+            50% {{ opacity: 0.4; box-shadow: 0 0 2px #00FF88; }}
+        }}
+
+        /* ── STAT CARDS ── */
         #stats {{
-            position: absolute; top: 16px; left: 16px; z-index: 10;
-            display: flex; flex-direction: column; gap: 6px;
+            position: absolute; top: 20px; left: 16px; z-index: 10;
+            display: flex; flex-direction: column; gap: 8px;
         }}
         .stat-card {{
-            background: rgba(10,10,10,0.92); border-radius: 8px;
-            padding: 8px 14px; border: 1px solid #333;
-            backdrop-filter: blur(10px); min-width: 160px;
+            background: linear-gradient(135deg, rgba(0,8,20,0.92) 0%, rgba(0,15,35,0.92) 100%);
+            border-radius: 10px; padding: 10px 16px;
+            border: 1px solid rgba(255,255,255,0.07);
+            backdrop-filter: blur(20px); min-width: 170px;
+            position: relative; overflow: hidden;
+            transition: border-color 0.3s, box-shadow 0.3s;
         }}
-        .stat-value {{ font-size: 22px; font-weight: bold; line-height: 1; }}
-        .stat-label {{ font-size: 10px; color: #888; margin-top: 2px; }}
+        .stat-card:hover {{
+            border-color: rgba(0,180,255,0.4);
+            box-shadow: 0 0 20px rgba(0,180,255,0.1);
+        }}
+        .stat-card::before {{
+            content: ''; position: absolute;
+            top: 0; left: 0; right: 0; height: 1px;
+            background: linear-gradient(90deg, transparent, var(--accent, rgba(0,180,255,0.5)), transparent);
+        }}
+        .stat-card::after {{
+            content: ''; position: absolute;
+            top: 0; left: 0; bottom: 0; width: 2px;
+            background: var(--accent, rgba(0,180,255,0.5));
+            border-radius: 2px 0 0 2px;
+        }}
+        .stat-value {{
+            font-size: 26px; font-weight: 700; line-height: 1;
+            font-variant-numeric: tabular-nums;
+        }}
+        .stat-label {{ font-size: 9px; color: rgba(255,255,255,0.4); margin-top: 3px; letter-spacing: 1.5px; text-transform: uppercase; }}
+        .stat-icon {{ position: absolute; right: 12px; top: 50%; transform: translateY(-50%); font-size: 18px; opacity: 0.2; }}
 
+        /* ── LEGEND ── */
         #legend {{
-            position: absolute; bottom: 40px; left: 16px; z-index: 10;
-            background: rgba(10,10,10,0.92); border-radius: 8px;
-            padding: 12px 16px; border: 1px solid #333;
-            backdrop-filter: blur(10px); font-size: 11px;
+            position: absolute; bottom: 30px; left: 16px; z-index: 10;
+            background: linear-gradient(135deg, rgba(0,8,20,0.92) 0%, rgba(0,15,35,0.92) 100%);
+            border-radius: 10px; padding: 14px 18px;
+            border: 1px solid rgba(255,255,255,0.07);
+            backdrop-filter: blur(20px); font-size: 11px;
             display: flex; gap: 20px;
+            box-shadow: 0 4px 24px rgba(0,0,0,0.4);
         }}
-        .legend-section h4 {{ color: #AAD4FF; margin: 0 0 8px 0; font-size: 12px; }}
-        .legend-item {{ display: flex; align-items: center; gap: 6px; margin: 3px 0; }}
-        .legend-dot {{ width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }}
-        .legend-box {{ width: 14px; height: 10px; border-radius: 2px; flex-shrink: 0; }}
+        .legend-title {{
+            font-size: 9px; color: rgba(0,180,255,0.8); font-weight: 600;
+            letter-spacing: 2px; text-transform: uppercase; margin-bottom: 8px;
+            border-bottom: 1px solid rgba(0,180,255,0.2); padding-bottom: 4px;
+        }}
+        .legend-item {{ display: flex; align-items: center; gap: 8px; margin: 4px 0; color: rgba(255,255,255,0.7); }}
+        .legend-dot {{
+            width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
+            box-shadow: 0 0 6px currentColor;
+        }}
+        .legend-box {{
+            width: 14px; height: 10px; border-radius: 2px; flex-shrink: 0;
+            box-shadow: 0 0 6px currentColor;
+        }}
 
+        /* ── POPUP ── */
         #popup {{
             position: absolute; z-index: 20;
-            background: rgba(10,10,10,0.95); border: 1px solid #444;
-            border-radius: 8px; padding: 12px 16px;
-            font-size: 12px; max-width: 240px;
-            backdrop-filter: blur(10px); display: none;
+            background: linear-gradient(135deg, rgba(0,8,20,0.98) 0%, rgba(0,20,40,0.98) 100%);
+            border: 1px solid rgba(0,180,255,0.3);
+            border-radius: 12px; padding: 16px 18px;
+            font-size: 12px; min-width: 220px; max-width: 280px;
+            backdrop-filter: blur(20px); display: none;
+            box-shadow: 0 0 40px rgba(0,0,0,0.6), 0 0 20px rgba(0,180,255,0.1);
+            animation: popup-in 0.2s ease-out;
         }}
-        #popup h3 {{ color: #FF6666; margin: 0 0 8px 0; font-size: 14px; }}
-        #popup .row {{ display: flex; justify-content: space-between; margin: 3px 0; }}
-        #popup .key {{ color: #888; }}
-        #popup .val {{ color: white; font-weight: bold; }}
+        @keyframes popup-in {{
+            from {{ opacity: 0; transform: scale(0.95) translateY(4px); }}
+            to {{ opacity: 1; transform: scale(1) translateY(0); }}
+        }}
+        #popup-header {{
+            display: flex; justify-content: space-between; align-items: flex-start;
+            margin-bottom: 12px; padding-bottom: 10px;
+            border-bottom: 1px solid rgba(255,255,255,0.08);
+        }}
+        #popup-title {{
+            font-size: 13px; font-weight: 700; color: white; margin: 0;
+            letter-spacing: 0.5px;
+        }}
         #close-popup {{
-            position: absolute; top: 6px; right: 10px;
-            cursor: pointer; color: #888; font-size: 16px;
+            cursor: pointer; color: rgba(255,255,255,0.3); font-size: 18px; line-height: 1;
+            transition: color 0.2s; margin-left: 10px; flex-shrink: 0;
         }}
+        #close-popup:hover {{ color: white; }}
+        .popup-row {{
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.04);
+        }}
+        .popup-key {{ color: rgba(255,255,255,0.4); font-size: 10px; letter-spacing: 1px; text-transform: uppercase; }}
+        .popup-val {{ color: white; font-weight: 600; font-size: 12px; }}
 
-        .mapboxgl-ctrl-group {{ background: rgba(10,10,10,0.92) !important; }}
+        /* ── MAPBOX CONTROLS ── */
+        .mapboxgl-ctrl-group {{
+            background: linear-gradient(135deg, rgba(0,8,20,0.92), rgba(0,15,35,0.92)) !important;
+            border: 1px solid rgba(255,255,255,0.07) !important;
+            border-radius: 8px !important;
+            backdrop-filter: blur(20px) !important;
+        }}
         .mapboxgl-ctrl-group button {{ background: transparent !important; }}
-        .mapboxgl-ctrl-group button span {{ filter: invert(1); }}
+        .mapboxgl-ctrl-group button span {{ filter: invert(1) brightness(0.7); }}
+        .mapboxgl-ctrl-group button:hover span {{ filter: invert(1); }}
+        .mapboxgl-ctrl-attrib {{ display: none !important; }}
+
+        /* ── CORNER DECORATIONS ── */
+        .corner {{
+            position: absolute; width: 20px; height: 20px; z-index: 6;
+            border-color: rgba(0,180,255,0.4);
+            border-style: solid;
+        }}
+        .corner-tl {{ top: 10px; left: 10px; border-width: 2px 0 0 2px; }}
+        .corner-tr {{ top: 10px; right: 10px; border-width: 2px 2px 0 0; }}
+        .corner-bl {{ bottom: 10px; left: 10px; border-width: 0 0 2px 2px; }}
+        .corner-br {{ bottom: 10px; right: 10px; border-width: 0 2px 2px 0; }}
+
+        /* ── SCROLLBAR ── */
+        ::-webkit-scrollbar {{ width: 4px; }}
+        ::-webkit-scrollbar-track {{ background: rgba(0,0,0,0.2); }}
+        ::-webkit-scrollbar-thumb {{ background: rgba(0,180,255,0.3); border-radius: 2px; }}
     </style>
 </head>
 <body>
 
 <div id="map"></div>
 
+<!-- Corner decorations -->
+<div class="corner corner-tl"></div>
+<div class="corner corner-tr"></div>
+<div class="corner corner-bl"></div>
+<div class="corner corner-br"></div>
+
+<!-- Header -->
 <div id="header">
-    <h1>&#127774; National All-Hazards Monitor</h1>
-    <p id="update-time">Loading live data...</p>
+    <h1><span id="live-dot"></span>National All-Hazards Monitor</h1>
+    <p id="update-time">ACQUIRING LIVE DATA...</p>
 </div>
 
+<!-- Stat Cards -->
 <div id="stats">
-    <div class="stat-card">
-        <div class="stat-value" id="stat-warnings" style="color:#FF6666">-</div>
+    <div class="stat-card" style="--accent: rgba(255,80,80,0.6)">
+        <div class="stat-value" id="stat-warnings" style="color:#FF5050">—</div>
         <div class="stat-label">Active Warnings</div>
+        <div class="stat-icon">⚠</div>
     </div>
-    <div class="stat-card">
-        <div class="stat-value" id="stat-eq" style="color:#AAD4FF">-</div>
+    <div class="stat-card" style="--accent: rgba(0,180,255,0.6)">
+        <div class="stat-value" id="stat-eq" style="color:#00B4FF">—</div>
         <div class="stat-label">Earthquakes M2.5+</div>
+        <div class="stat-icon">🔴</div>
     </div>
-    <div class="stat-card">
-        <div class="stat-value" id="stat-fires" style="color:#FF4500">-</div>
+    <div class="stat-card" style="--accent: rgba(255,80,0,0.6)">
+        <div class="stat-value" id="stat-fires" style="color:#FF5000">—</div>
         <div class="stat-label">Fire Detections</div>
+        <div class="stat-icon">🔥</div>
     </div>
-    <div class="stat-card">
-        <div class="stat-value" id="stat-spc" style="color:#76FF7A">-</div>
+    <div class="stat-card" style="--accent: rgba(0,255,120,0.6)">
+        <div class="stat-value" id="stat-spc" style="color:#00FF78">—</div>
         <div class="stat-label">SPC Outlook Zones</div>
+        <div class="stat-icon">⛈</div>
     </div>
 </div>
 
+<!-- Legend -->
 <div id="legend">
     <div class="legend-section">
-        <h4>&#9889; NWS Warnings</h4>
-        <div class="legend-item"><div class="legend-box" style="background:#FF0000"></div> Tornado</div>
-        <div class="legend-item"><div class="legend-box" style="background:#FF6600"></div> Hurricane</div>
-        <div class="legend-item"><div class="legend-box" style="background:#FF6666"></div> Severe T-Storm</div>
-        <div class="legend-item"><div class="legend-box" style="background:#00BFFF"></div> Flash Flood</div>
-        <div class="legend-item"><div class="legend-box" style="background:#FFFF00"></div> Other</div>
+        <div class="legend-title">⚡ NWS Warnings</div>
+        <div class="legend-item"><div class="legend-box" style="background:#FF0000;color:#FF0000"></div>Tornado</div>
+        <div class="legend-item"><div class="legend-box" style="background:#FF6600;color:#FF6600"></div>Hurricane</div>
+        <div class="legend-item"><div class="legend-box" style="background:#FF6666;color:#FF6666"></div>Severe T-Storm</div>
+        <div class="legend-item"><div class="legend-box" style="background:#00BFFF;color:#00BFFF"></div>Flash Flood</div>
+        <div class="legend-item"><div class="legend-box" style="background:#FFFF00;color:#FFFF00"></div>Other</div>
     </div>
     <div class="legend-section">
-        <h4>&#9928; SPC Outlook</h4>
-        <div class="legend-item"><div class="legend-box" style="background:#76FF7A"></div> General Thunder</div>
-        <div class="legend-item"><div class="legend-box" style="background:#FFFF00"></div> Slight Risk</div>
-        <div class="legend-item"><div class="legend-box" style="background:#FF9900"></div> Enhanced Risk</div>
-        <div class="legend-item"><div class="legend-box" style="background:#FF0000"></div> Moderate Risk</div>
+        <div class="legend-title">⛈ SPC Outlook</div>
+        <div class="legend-item"><div class="legend-box" style="background:#76FF7A;color:#76FF7A"></div>General Thunder</div>
+        <div class="legend-item"><div class="legend-box" style="background:#FFFF00;color:#FFFF00"></div>Slight Risk</div>
+        <div class="legend-item"><div class="legend-box" style="background:#FF9900;color:#FF9900"></div>Enhanced Risk</div>
+        <div class="legend-item"><div class="legend-box" style="background:#FF0000;color:#FF0000"></div>Moderate Risk</div>
     </div>
     <div class="legend-section">
-        <h4>&#128308; Earthquakes</h4>
-        <div class="legend-item"><div class="legend-dot" style="background:#FFFF00"></div> M2.5 - 3.9</div>
-        <div class="legend-item"><div class="legend-dot" style="background:#FF9900"></div> M4.0 - 4.9</div>
-        <div class="legend-item"><div class="legend-dot" style="background:#FF0000"></div> M5.0+</div>
-        <h4 style="margin-top:8px">&#128293; Wildfires</h4>
-        <div class="legend-item"><div class="legend-dot" style="background:#FF4500"></div> NASA FIRMS</div>
+        <div class="legend-title">🔴 Earthquakes</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#FFFF00;color:#FFFF00"></div>M2.5 – 3.9</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#FF9900;color:#FF9900"></div>M4.0 – 4.9</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#FF0000;color:#FF0000"></div>M5.0+</div>
+        <div class="legend-title" style="margin-top:10px">🔥 Wildfires</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#FF4500;color:#FF4500"></div>NASA FIRMS</div>
     </div>
 </div>
 
+<!-- Popup -->
 <div id="popup">
-    <span id="close-popup" onclick="document.getElementById('popup').style.display='none'">&#x2715;</span>
-    <h3 id="popup-title">Feature</h3>
+    <div id="popup-header">
+        <h3 id="popup-title">Feature</h3>
+        <span id="close-popup" onclick="document.getElementById('popup').style.display='none'">✕</span>
+    </div>
     <div id="popup-content"></div>
 </div>
 
@@ -896,12 +1028,14 @@ function showPopup(title, rows, e) {{
     document.getElementById('popup-title').textContent = title;
     let html = '';
     for (const [k, v] of Object.entries(rows)) {{
-        html += `<div class="row"><span class="key">${{k}}</span><span class="val">${{v}}</span></div>`;
+        html += `<div class="popup-row"><span class="popup-key">${{k}}</span><span class="popup-val">${{v}}</span></div>`;
     }}
     document.getElementById('popup-content').innerHTML = html;
     popup.style.display = 'block';
-    popup.style.left = (e.point.x + 10) + 'px';
-    popup.style.top  = (e.point.y - 10) + 'px';
+    const x = e.point.x + 14;
+    const y = e.point.y - 10;
+    popup.style.left = Math.min(x, window.innerWidth - 300) + 'px';
+    popup.style.top  = Math.max(y, 10) + 'px';
 }}
 
 function setupLayers() {{
@@ -1147,9 +1281,9 @@ function setupLayers() {{
             document.getElementById('stat-spc').textContent      = s.spc_zones      || 0;
             
             if (data.last_update && data.last_update !== 'Never') {{
-                document.getElementById('update-time').textContent = 'Last updated: ' + data.last_update;
+                document.getElementById('update-time').textContent = 'LAST UPDATED: ' + data.last_update;
             }} else {{
-                document.getElementById('update-time').textContent = 'Downloading live data...';
+                document.getElementById('update-time').textContent = 'ACQUIRING LIVE DATA...';
             }}
 
             // Refresh all map sources with fresh data
