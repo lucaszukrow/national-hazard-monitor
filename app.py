@@ -189,25 +189,40 @@ def fetch_storms():
 
 def fetch_fires():
     print("Downloading NASA FIRMS fires...")
-    try:
-        r = requests.get(FIRMS_URL, timeout=30)
-        r.raise_for_status()
-        lines = r.text.strip().split("\n")
-        if len(lines) < 2:
-            return []
-        headers = [h.strip() for h in lines[0].split(",")]
-        fires = []
-        for line in lines[1:]:
-            if not line.strip():
+    # Try multiple FIRMS endpoints
+    urls = [
+        f"https://firms.modaps.eosdis.nasa.gov/api/area/csv/{FIRMS_KEY}/VIIRS_SNPP_NRT/-125,24,-66,50/1",
+        f"https://firms.modaps.eosdis.nasa.gov/api/area/csv/{FIRMS_KEY}/VIIRS_NOAA20_NRT/-125,24,-66,50/1",
+        f"https://firms.modaps.eosdis.nasa.gov/api/area/csv/{FIRMS_KEY}/MODIS_NRT/-125,24,-66,50/1",
+    ]
+    for url in urls:
+        try:
+            r = requests.get(url, timeout=30)
+            r.raise_for_status()
+            text = r.text.strip()
+            if not text or "error" in text.lower()[:50]:
+                print(f"  FIRMS: empty response from {url.split('/')[-3]}")
                 continue
-            vals = [v.strip() for v in line.split(",")]
-            if len(vals) >= len(headers):
-                fires.append(dict(zip(headers, vals)))
-        print(f"  FIRMS: {len(fires)} fire detections")
-        return fires
-    except Exception as e:
-        print(f"  WARNING: FIRMS failed: {e}")
-        return []
+            lines = text.split("\n")
+            if len(lines) < 2:
+                print(f"  FIRMS: only {len(lines)} lines from {url.split('/')[-3]}")
+                continue
+            headers = [h.strip() for h in lines[0].split(",")]
+            fires = []
+            for line in lines[1:]:
+                if not line.strip():
+                    continue
+                vals = [v.strip() for v in line.split(",")]
+                if len(vals) >= len(headers):
+                    fires.append(dict(zip(headers, vals)))
+            if fires:
+                print(f"  FIRMS: {len(fires)} fire detections from {url.split('/')[-3]}")
+                return fires
+        except Exception as e:
+            print(f"  FIRMS {url.split('/')[-3]} failed: {e}")
+            continue
+    print("  FIRMS: all endpoints failed")
+    return []
 
 def fetch_population():
     print("Loading Census population data...")
