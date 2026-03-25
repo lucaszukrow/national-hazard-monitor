@@ -127,7 +127,9 @@ state = {
         "affected_counties": []
     },
     "map_html": "",
-    "updating": False
+    "updating": False,
+    "lightning": {"type": "FeatureCollection", "features": []},
+    "fire_perimeters": {"type": "FeatureCollection", "features": []}
 }
 
 # Load cache at module level — runs when gunicorn imports app
@@ -593,8 +595,10 @@ def run_update():
         warnings   = fetch_warnings()
         spc        = fetch_spc()
         earthquakes = fetch_earthquakes()
-        storms     = fetch_storms()
-        fires      = fetch_fires()
+        storms         = fetch_storms()
+        fires          = fetch_fires()
+        lightning      = fetch_lightning()
+        fire_perimeters = fetch_fire_perimeters()
 
         # Load population once
         if not state["pop_data"]:
@@ -627,6 +631,8 @@ def run_update():
             "earthquakes":  earthquakes,
             "storms":       storms,
             "fires":        fires,
+            "lightning":    lightning,
+            "fire_perimeters": fire_perimeters,
             "map_html":     map_html,
             "summary": {
                 "warnings_count":   len(warnings.get("features", [])),
@@ -642,13 +648,15 @@ def run_update():
         print(f"  Update complete — {len(affected)} counties affected")
         # Save to cache file so data survives restarts
         save_cache({
-            "last_update": state["last_update"],
-            "warnings":    state["warnings"],
-            "spc":         state["spc"],
-            "earthquakes": state["earthquakes"],
-            "fires":       state["fires"],
-            "summary":     state["summary"],
-            "map_html":    state["map_html"]
+            "last_update":     state["last_update"],
+            "warnings":        state["warnings"],
+            "spc":             state["spc"],
+            "earthquakes":     state["earthquakes"],
+            "fires":           state["fires"],
+            "lightning":       state["lightning"],
+            "fire_perimeters": state["fire_perimeters"],
+            "summary":         state["summary"],
+            "map_html":        state["map_html"]
         })
         print("  Cache saved")
 
@@ -656,6 +664,46 @@ def run_update():
         print(f"  ERROR during update: {e}")
     finally:
         state["updating"] = False
+
+def fetch_lightning():
+    """Fetch recent lightning strikes from NOAA ENTLN via Iowa State."""
+    print("Downloading lightning data...")
+    try:
+        # Iowa State serves recent lightning strikes as GeoJSON
+        url = "https://mesonet.agron.iastate.edu/geojson/lsr.php?hours=1&wfo=all&ltype=L"
+        r = requests.get(url, timeout=15)
+        r.raise_for_status()
+        data = r.json()
+        features = data.get("features", [])
+        print(f"  Lightning: {len(features)} strikes (last 1hr)")
+        return data
+    except Exception as e:
+        print(f"  Lightning failed: {e}")
+        return {"type": "FeatureCollection", "features": []}
+
+def fetch_fire_perimeters():
+    """Fetch active wildfire perimeters from NIFC."""
+    print("Downloading wildfire perimeters...")
+    try:
+        # NIFC active fire perimeters - updated daily
+        url = "https://services3.arcgis.com/T4QMspbfLg3qTGWY/arcgis/rest/services/WFIGS_Interagency_Perimeters_YTD/FeatureServer/0/query?where=1%3D1&outFields=IncidentName,GISAcres,PercentContained,ModifiedOnDateTime_dt&geometryPrecision=4&outSR=4326&f=geojson"
+        r = requests.get(url, timeout=20)
+        r.raise_for_status()
+        data = r.json()
+        features = data.get("features", [])
+        print(f"  Fire perimeters: {len(features)} active fires")
+        return data
+    except Exception as e:
+        print(f"  Fire perimeters failed: {e}")
+        # Fallback to alternative NIFC endpoint
+        try:
+            url2 = "https://opendata.arcgis.com/datasets/5da472c6d27b4b67970acc7b5044c862_0.geojson"
+            r = requests.get(url2, timeout=20)
+            data = r.json()
+            print(f"  Fire perimeters (fallback): {len(data.get('features',[]))} fires")
+            return data
+        except Exception:
+            return {"type": "FeatureCollection", "features": []}
 
 def schedule_updates(interval_minutes=30):
     """Run update on schedule in background thread."""
@@ -871,6 +919,24 @@ def api_infrastructure():
         headers={"Access-Control-Allow-Origin": "*"}
     )
 
+
+@app.server.route("/api/lightning")
+def api_lightning():
+    """Returns recent lightning strikes as GeoJSON."""
+    return flask_module.Response(
+        json.dumps(state.get("lightning", {"type":"FeatureCollection","features":[]})),
+        mimetype="application/json",
+        headers={"Access-Control-Allow-Origin": "*"}
+    )
+
+@app.server.route("/api/fire_perimeters")
+def api_fire_perimeters():
+    """Returns active wildfire perimeters as GeoJSON."""
+    return flask_module.Response(
+        json.dumps(state.get("fire_perimeters", {"type":"FeatureCollection","features":[]})),
+        mimetype="application/json",
+        headers={"Access-Control-Allow-Origin": "*"}
+    )
 
 @app.server.route("/mapbox")
 def mapbox_map():
@@ -1134,6 +1200,9 @@ def mapbox_map():
         <div class="legend-item"><div class="legend-dot" style="background:#FF0000;color:#FF0000"></div>M5.0+</div>
         <div class="legend-title" style="margin-top:10px">🔥 Wildfires</div>
         <div class="legend-item"><div class="legend-dot" style="background:#FF4500;color:#FF4500"></div>NASA FIRMS</div>
+        <div class="legend-item"><div class="legend-box" style="background:rgba(255,69,0,0.5);color:#FF4500"></div>Fire Perimeter</div>
+        <div class="legend-title" style="margin-top:10px">⚡ Lightning</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#FFFF00;color:#FFFF00"></div>Strike (last 1hr)</div>
     </div>
     <div class="legend-section">
         <div class="legend-title">🏗 Infrastructure</div>
@@ -1527,6 +1596,8 @@ function setupLayers() {{
         return btn;
     }}
 
+    toggleContainer.appendChild(makeToggle('🔥 Fire Perimeters', 'fire-perimeter-fill', true));
+    toggleContainer.appendChild(makeToggle('⚡ Lightning', 'lightning-strikes', true));
     toggleContainer.appendChild(makeToggle('NEXRAD Radar', 'nexrad-layer', true));
     toggleContainer.appendChild(makeToggle('GOES Infrared', 'goes-ir-layer', false));
     toggleContainer.appendChild(makeToggle('Affected Counties', 'counties-fill', true));
@@ -1564,7 +1635,7 @@ function setupLayers() {{
 
             // Refresh all map sources with fresh data
             if (map.loaded()) {{
-                ['warnings','spc','earthquakes','fires','counties','infrastructure'].forEach(src => {{
+                ['warnings','spc','earthquakes','fires','counties','infrastructure','lightning','fire-perimeters'].forEach(src => {{
                     if (map.getSource(src)) {{
                         map.getSource(src).setData('/api/' + src + '?t=' + Date.now());
                     }}
