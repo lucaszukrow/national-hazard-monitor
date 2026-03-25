@@ -34,7 +34,7 @@ SPC_URL      = "https://www.spc.noaa.gov/products/outlook/day1otlk_cat.nolyr.geo
 USGS_EQ_URL  = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_day.geojson"
 NHC_URL      = "https://www.nhc.noaa.gov/CurrentStorms.json"
 FIRMS_KEY    = "9979055d64039403128c5f82c0997133"
-FIRMS_URL    = f"https://firms.modaps.eosdis.nasa.gov/api/area/csv/{FIRMS_KEY}/VIIRS_SNPP_NRT/-125,24,-66,50/1"
+FIRMS_URL    = f"https://firms.modaps.eosdis.nasa.gov/api/area/csv/{FIRMS_KEY}/VIIRS_SNPP_NRT/-125,24,-66,50/2"
 CENSUS_URL   = "https://www2.census.gov/programs-surveys/popest/datasets/2020-2023/counties/totals/co-est2023-alldata.csv"
 COUNTIES_URL = "https://raw.githubusercontent.com/plotly/datasets/master/geojson-counties-fips.json"
 
@@ -189,40 +189,45 @@ def fetch_storms():
 
 def fetch_fires():
     print("Downloading NASA FIRMS fires...")
-    # Try multiple FIRMS endpoints
+    # Combine ALL satellite sources for maximum coverage
     urls = [
-        f"https://firms.modaps.eosdis.nasa.gov/api/area/csv/{FIRMS_KEY}/VIIRS_SNPP_NRT/-125,24,-66,50/1",
-        f"https://firms.modaps.eosdis.nasa.gov/api/area/csv/{FIRMS_KEY}/VIIRS_NOAA20_NRT/-125,24,-66,50/1",
-        f"https://firms.modaps.eosdis.nasa.gov/api/area/csv/{FIRMS_KEY}/MODIS_NRT/-125,24,-66,50/1",
+        f"https://firms.modaps.eosdis.nasa.gov/api/area/csv/{FIRMS_KEY}/VIIRS_SNPP_NRT/-125,24,-66,50/2",
+        f"https://firms.modaps.eosdis.nasa.gov/api/area/csv/{FIRMS_KEY}/VIIRS_NOAA20_NRT/-125,24,-66,50/2",
+        f"https://firms.modaps.eosdis.nasa.gov/api/area/csv/{FIRMS_KEY}/MODIS_NRT/-125,24,-66,50/2",
     ]
+    all_fires = []
+    seen_coords = set()
     for url in urls:
         try:
             r = requests.get(url, timeout=30)
             r.raise_for_status()
             text = r.text.strip()
             if not text or "error" in text.lower()[:50]:
-                print(f"  FIRMS: empty response from {url.split('/')[-3]}")
                 continue
             lines = text.split("\n")
             if len(lines) < 2:
-                print(f"  FIRMS: only {len(lines)} lines from {url.split('/')[-3]}")
                 continue
             headers = [h.strip() for h in lines[0].split(",")]
-            fires = []
+            count = 0
             for line in lines[1:]:
                 if not line.strip():
                     continue
                 vals = [v.strip() for v in line.split(",")]
                 if len(vals) >= len(headers):
-                    fires.append(dict(zip(headers, vals)))
-            if fires:
-                print(f"  FIRMS: {len(fires)} fire detections from {url.split('/')[-3]}")
-                return fires
+                    fire = dict(zip(headers, vals))
+                    # Deduplicate by lat/lon rounded to 2 decimals
+                    key = (round(float(fire.get("latitude",0)),2),
+                           round(float(fire.get("longitude",0)),2))
+                    if key not in seen_coords:
+                        seen_coords.add(key)
+                        all_fires.append(fire)
+                        count += 1
+            print(f"  FIRMS {url.split('/')[-3]}: +{count} detections")
         except Exception as e:
             print(f"  FIRMS {url.split('/')[-3]} failed: {e}")
             continue
-    print("  FIRMS: all endpoints failed")
-    return []
+    print(f"  FIRMS total: {len(all_fires)} fire detections")
+    return all_fires
 
 def fetch_population():
     print("Loading Census population data...")
