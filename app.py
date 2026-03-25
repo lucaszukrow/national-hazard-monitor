@@ -1219,10 +1219,12 @@ def mapbox_map():
             display: none;
         }}
         .threat-item {{
-            padding: 6px 8px; margin: 3px 0; border-radius: 6px;
+            padding: 7px 10px; margin: 4px 0; border-radius: 6px;
             font-size: 11px; border-left: 3px solid;
             background: rgba(255,255,255,0.03);
+            transition: background 0.2s;
         }}
+        .threat-item:hover {{ background: rgba(255,255,255,0.06); }}
         .threat-none {{
             color: rgba(0,255,100,0.8); border-color: #00FF64;
             text-align: center; padding: 10px;
@@ -1880,13 +1882,15 @@ async function searchLocation() {{
             fetch('/api/warnings').then(r => r.json()),
             fetch('/api/earthquakes').then(r => r.json()),
             fetch('/api/fires').then(r => r.json()),
-            fetch('/api/lightning').then(r => r.json()),
-            fetch('/api/fire_perimeters').then(r => r.json()),
+            fetch('https://mesonet.agron.iastate.edu/geojson/lsr.php?hours=6&wfo=all').then(r => r.json()).then(d => ({type:'FeatureCollection', features: (d.features||[]).filter(f => ['TORNADO','HAIL','TSTM WND GST','TSTM WND DMG','FUNNEL CLOUD','LIGHTNING','FLASH FLOOD'].some(x => (f.properties?.typetext||'').toUpperCase().includes(x)))})),
+            fetch('https://services3.arcgis.com/T4QMspbfLg3qTGWY/arcgis/rest/services/WFIGS_Interagency_Perimeters_YTD/FeatureServer/0/query?where=1%3D1&outFields=IncidentName,GISAcres,PercentContained&geometryPrecision=3&outSR=4326&resultRecordCount=500&f=geojson').then(r => r.json()),
         ]);
 
         const threats = [];
+        let totalScore = 0;
+        const userPt = turf.point([lng, lat]);
 
-        // Check NWS warnings - use booleanIntersects for polygons
+        // ── NWS WARNINGS ─────────────────────────────
         const warningsInBuffer = warnings.features.filter(f => {{
             try {{
                 if (!f.geometry) return false;
@@ -1896,93 +1900,183 @@ async function searchLocation() {{
                 return turf.booleanIntersects(f, buffer);
             }} catch(e) {{ return false; }}
         }});
-        if (warningsInBuffer.length > 0) {{
+
+        warningsInBuffer.forEach(f => {{
+            const phenom = (f.properties?.phenom || '').toUpperCase();
+            const sig    = (f.properties?.sig    || '').toUpperCase();
+            let weight   = THREAT_WEIGHTS.other_warning;
+            let label    = '⚠ Warning';
+            let color    = '#FF8800';
+
+            if (phenom === 'TO' && sig === 'W') {{ weight = THREAT_WEIGHTS.tornado_warning;   label = '🌪 Tornado Warning';             color = '#FF0000'; }}
+            else if (phenom === 'HU')           {{ weight = THREAT_WEIGHTS.hurricane_warning;  label = '🌀 Hurricane Warning/Watch';     color = '#FF6600'; }}
+            else if (phenom === 'FF')           {{ weight = THREAT_WEIGHTS.flash_flood;        label = '🌊 Flash Flood Warning';         color = '#00BFFF'; }}
+            else if (phenom === 'FA')           {{ weight = THREAT_WEIGHTS.flood_warning;      label = '🌊 Flood Warning';               color = '#0099FF'; }}
+            else if (phenom === 'SV')           {{ weight = THREAT_WEIGHTS.severe_tstorm;      label = '⛈ Severe Thunderstorm Warning'; color = '#FF6666'; }}
+            else if (phenom === 'WS')           {{ weight = THREAT_WEIGHTS.winter_storm;       label = '❄ Winter Storm Warning';        color = '#AAAAFF'; }}
+            else if (phenom === 'FW')           {{ weight = THREAT_WEIGHTS.other_warning + 5;  label = '🔥 Fire Weather Warning';        color = '#FF4500'; }}
+
+            // Calculate distance to warning centroid
+            let dist = radiusMiles;
+            try {{
+                const centroid = turf.centroid(f);
+                dist = turf.distance(userPt, centroid, {{units: 'miles'}});
+            }} catch(e) {{}}
+
+            const decay   = distanceDecay(dist, radiusMiles);
+            const pts     = Math.round(weight * decay);
+            totalScore   += pts;
+
             threats.push({{
-                type: 'warning',
-                color: '#FF5050',
-                text: `⚠ ${{warningsInBuffer.length}} Active NWS Warning(s) within ${{radiusMiles}} miles`
+                type: 'threat', color, dist,
+                text: `${{label}} (+${{pts}} pts)`
+            }});
+        }});
+
+        // ── EARTHQUAKES ───────────────────────────────
+        const eqFeats = earthquakes.features
+            .filter(f => f.geometry?.coordinates)
+            .map(f => ({{
+                ...f,
+                _pt: turf.point([f.geometry.coordinates[0], f.geometry.coordinates[1]])
+            }}))
+            .filter(f => {{
+                try {{ return turf.booleanPointInPolygon(f._pt, buffer); }}
+                catch(e) {{ return false; }}
+            }});
+
+        eqFeats.forEach(f => {{
+            const mag  = parseFloat(f.properties?.mag || 0);
+            const dist = turf.distance(userPt, f._pt, {{units: 'miles'}});
+            let weight = mag >= 5 ? THREAT_WEIGHTS.earthquake_m5
+                       : mag >= 4 ? THREAT_WEIGHTS.earthquake_m4
+                       :            THREAT_WEIGHTS.earthquake_m3;
+            const decay = distanceDecay(dist, radiusMiles);
+            const pts   = Math.round(weight * decay);
+            totalScore += pts;
+            threats.push({{
+                type: 'threat', color: '#00B4FF', dist,
+                text: `🔴 Earthquake M${{mag.toFixed(1)}} — ${{f.properties?.place || 'Unknown'}} (+${{pts}} pts)`
+            }});
+        }});
+
+        // ── WILDFIRES ─────────────────────────────────
+        const fireFeats = fires.features
+            .filter(f => f.geometry?.coordinates)
+            .map(f => ({{
+                ...f,
+                _pt: turf.point([f.geometry.coordinates[0], f.geometry.coordinates[1]])
+            }}))
+            .filter(f => {{
+                try {{ return turf.booleanPointInPolygon(f._pt, buffer); }}
+                catch(e) {{ return false; }}
+            }});
+
+        if (fireFeats.length > 0) {{
+            // Find closest fire
+            const closest = fireFeats.reduce((a, b) => {{
+                const da = turf.distance(userPt, a._pt, {{units:'miles'}});
+                const db = turf.distance(userPt, b._pt, {{units:'miles'}});
+                return da < db ? a : b;
+            }});
+            const dist  = turf.distance(userPt, closest._pt, {{units:'miles'}});
+            const decay = distanceDecay(dist, radiusMiles);
+            const pts   = Math.round(THREAT_WEIGHTS.wildfire_near * decay);
+            totalScore += pts;
+            threats.push({{
+                type: 'threat', color: '#FF5000', dist,
+                text: `🔥 ${{fireFeats.length}} Wildfire Detection(s) — closest ${{Math.round(dist)}}mi (+${{pts}} pts)`
             }});
         }}
 
-        // Check earthquakes
-        const eqPoints = turf.featureCollection(
-            earthquakes.features
-                .filter(f => f.geometry && f.geometry.coordinates)
-                .map(f => turf.point(
-                    [f.geometry.coordinates[0], f.geometry.coordinates[1]],
-                    {{mag: f.properties.mag || 0, place: f.properties.place || ''}}
-                ))
-        );
-        const eqInBuffer = turf.pointsWithinPolygon(eqPoints, buffer);
-        if (eqInBuffer.features.length > 0) {{
-            const maxMag = Math.max(...eqInBuffer.features.map(f => f.properties.mag || 0));
+        // ── STORM REPORTS ─────────────────────────────
+        const stormFeats = lightning.features
+            .filter(f => f.geometry?.coordinates)
+            .map(f => ({{
+                ...f,
+                _pt: turf.point([f.geometry.coordinates[0], f.geometry.coordinates[1]])
+            }}))
+            .filter(f => {{
+                try {{ return turf.booleanPointInPolygon(f._pt, buffer); }}
+                catch(e) {{ return false; }}
+            }});
+
+        if (stormFeats.length > 0) {{
+            // Time decay — recent reports weighted more
+            const now = Date.now();
+            stormFeats.forEach(f => {{
+                const validTime = new Date(f.properties?.valid || now).getTime();
+                const hoursAgo  = (now - validTime) / 3600000;
+                const recency   = Math.max(0, 1 - hoursAgo / 6);
+                const dist      = turf.distance(userPt, f._pt, {{units:'miles'}});
+                const decay     = distanceDecay(dist, radiusMiles);
+                const pts       = Math.round(THREAT_WEIGHTS.storm_report * decay * recency);
+                totalScore     += pts;
+            }});
+            const types = [...new Set(stormFeats.map(f => f.properties?.typetext || 'Storm').slice(0,3))];
             threats.push({{
-                type: 'earthquake',
-                color: '#00B4FF',
-                text: `🔴 ${{eqInBuffer.features.length}} Earthquake(s) M2.5+ — largest M${{maxMag.toFixed(1)}}`
+                type: 'threat', color: '#FFFF00',
+                dist: turf.distance(userPt,
+                    stormFeats.reduce((a,b) =>
+                        turf.distance(userPt,a._pt,{{units:'miles'}}) <
+                        turf.distance(userPt,b._pt,{{units:'miles'}}) ? a : b
+                    )._pt, {{units:'miles'}}),
+                text: `⚡ ${{stormFeats.length}} Storm Report(s) — ${{types.join(', ')}}`
             }});
         }}
 
-        // Check wildfires
-        const firePoints = turf.featureCollection(
-            fires.features
-                .filter(f => f.geometry && f.geometry.coordinates)
-                .map(f => turf.point([f.geometry.coordinates[0], f.geometry.coordinates[1]]))
-        );
-        const fireInBuffer = turf.pointsWithinPolygon(firePoints, buffer);
-        if (fireInBuffer.features.length > 0) {{
-            threats.push({{
-                type: 'fire',
-                color: '#FF5000',
-                text: `🔥 ${{fireInBuffer.features.length}} Wildfire Detection(s) within ${{radiusMiles}} miles`
-            }});
-        }}
-
-        // Check storm reports
-        const ltgPoints = turf.featureCollection(
-            lightning.features
-                .filter(f => f.geometry && f.geometry.coordinates)
-                .map(f => turf.point([f.geometry.coordinates[0], f.geometry.coordinates[1]]))
-        );
-        const ltgInBuffer = turf.pointsWithinPolygon(ltgPoints, buffer);
-        if (ltgInBuffer.features.length > 0) {{
-            threats.push({{
-                type: 'lightning',
-                color: '#FFFF00',
-                text: `⚡ ${{ltgInBuffer.features.length}} Severe Storm Report(s) in last 6 hours`
-            }});
-        }}
-
-        // Check fire perimeters
+        // ── FIRE PERIMETERS ───────────────────────────
         const perimInBuffer = perimeters.features.filter(f => {{
             try {{
                 if (!f.geometry) return false;
                 return turf.booleanIntersects(f, buffer);
             }} catch(e) {{ return false; }}
         }});
-        if (perimInBuffer.length > 0) {{
-            const totalAcres = perimInBuffer.reduce((s,f) => s + (parseFloat(f.properties.GISAcres)||0), 0);
+
+        perimInBuffer.forEach(f => {{
+            const acres = parseFloat(f.properties?.GISAcres || 0);
+            const name  = f.properties?.IncidentName || 'Active Fire';
+            let weight  = THREAT_WEIGHTS.fire_perimeter;
+            // Scale weight by fire size
+            if (acres > 100000) weight *= 1.5;
+            else if (acres > 10000) weight *= 1.2;
+
+            let dist = radiusMiles / 2;
+            try {{
+                const centroid = turf.centroid(f);
+                dist = turf.distance(userPt, centroid, {{units:'miles'}});
+            }} catch(e) {{}}
+
+            const decay = distanceDecay(dist, radiusMiles);
+            const pts   = Math.round(weight * decay);
+            totalScore += pts;
             threats.push({{
-                type: 'fire',
-                color: '#FF4500',
-                text: `🔥 ${{perimInBuffer.length}} Active Fire Perimeter(s) — ${{Math.round(totalAcres).toLocaleString()}} total acres`
+                type: 'threat', color: '#FF4500', dist,
+                text: `🔥 ${{name}} — ${{Math.round(acres).toLocaleString()}} acres (${{f.properties?.PercentContained||0}}% contained) (+${{pts}} pts)`
             }});
-        }}
+        }});
+
+        // ── CAP SCORE & SORT ──────────────────────────
+        totalScore = Math.min(100, Math.round(totalScore));
+
+        // Sort threats by distance
+        threats.sort((a,b) => (a.dist||99) - (b.dist||99));
 
         // Show results
         document.getElementById('clear-search').style.display = 'block';
+        const locationLabel = placeName.split(',').slice(0,2).join(',');
 
         if (threats.length === 0) {{
-            showResults([{{
-                type: 'safe',
-                text: `✅ No active threats within ${{radiusMiles}} miles of ${{placeName.split(',')[0]}}`
-            }}]);
+            showResults([
+                {{ type: 'score', score: 0 }},
+                {{ type: 'safe', text: `✅ No active threats detected within ${{radiusMiles}} miles of ${{locationLabel}}` }}
+            ]);
         }} else {{
-            threats.unshift({{
-                type: 'header',
-                text: `📍 ${{placeName.split(',')[0]}} — ${{radiusMiles}} mile radius`
-            }});
-            showResults(threats);
+            showResults([
+                {{ type: 'header', text: `📍 ${{locationLabel}} · ${{radiusMiles}}mi radius` }},
+                {{ type: 'score', score: totalScore }},
+                ...threats
+            ]);
         }}
 
     }} catch(err) {{
@@ -1992,6 +2086,44 @@ async function searchLocation() {{
         btn.textContent = '🔍 ANALYZE THREATS';
         btn.disabled = false;
     }}
+}}
+
+// ── THREAT SCORING ENGINE ────────────────────────
+const THREAT_WEIGHTS = {{
+    tornado_warning:    40,
+    hurricane_warning:  35,
+    fire_perimeter:     35,
+    severe_tstorm:      20,
+    flash_flood:        18,
+    wildfire_near:      15,
+    earthquake_m5:      25,
+    earthquake_m4:      12,
+    earthquake_m3:       5,
+    storm_report:        8,
+    flood_warning:      15,
+    winter_storm:       10,
+    other_warning:       8,
+}};
+
+function getThreatLevel(score) {{
+    if (score >= 75) return {{ label: 'EXTREME',   color: '#FF0000', bg: 'rgba(255,0,0,0.15)',    emoji: '🚨' }};
+    if (score >= 55) return {{ label: 'SEVERE',    color: '#FF4400', bg: 'rgba(255,68,0,0.12)',   emoji: '🔴' }};
+    if (score >= 35) return {{ label: 'HIGH',      color: '#FF8800', bg: 'rgba(255,136,0,0.12)',  emoji: '🟠' }};
+    if (score >= 15) return {{ label: 'ELEVATED',  color: '#FFCC00', bg: 'rgba(255,204,0,0.12)', emoji: '🟡' }};
+    return                  {{ label: 'LOW',       color: '#00FF88', bg: 'rgba(0,255,136,0.08)', emoji: '🟢' }};
+}}
+
+function distanceDecay(distMiles, radiusMiles) {{
+    // Closer threats weighted more heavily
+    // 0 miles = 1.5x, radius miles = 0.5x
+    return 1.5 - (distMiles / radiusMiles);
+}}
+
+function getProximityLabel(distMiles) {{
+    if (distMiles < 10)  return {{ label: 'IMMEDIATE', color: '#FF0000' }};
+    if (distMiles < 30)  return {{ label: 'NEAR',      color: '#FF8800' }};
+    if (distMiles < 60)  return {{ label: 'MODERATE',  color: '#FFCC00' }};
+    return                      {{ label: 'DISTANT',   color: '#888888' }};
 }}
 
 function showResults(threats) {{
@@ -2004,10 +2136,39 @@ function showResults(threats) {{
         if (t.type === 'header') {{
             return `<div style="font-size:10px;color:rgba(255,255,255,0.5);margin-bottom:6px;letter-spacing:1px">${{t.text}}</div>`;
         }}
+        if (t.type === 'score') {{
+            const level = getThreatLevel(t.score);
+            const pct = Math.min(100, t.score);
+            return `
+                <div style="background:${{level.bg}};border:1px solid ${{level.color}}40;
+                    border-radius:8px;padding:10px;margin:6px 0;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                        <span style="font-size:11px;font-weight:700;color:${{level.color}};letter-spacing:2px;">
+                            ${{level.emoji}} ${{level.label}} THREAT
+                        </span>
+                        <span style="font-size:20px;font-weight:700;color:${{level.color}}">${{Math.round(t.score)}}<span style="font-size:10px;color:rgba(255,255,255,0.4)">/100</span></span>
+                    </div>
+                    <div style="background:rgba(0,0,0,0.3);border-radius:4px;height:6px;overflow:hidden;">
+                        <div style="height:100%;width:${{pct}}%;background:linear-gradient(90deg,${{level.color}}88,${{level.color}});
+                            border-radius:4px;transition:width 0.8s ease;"></div>
+                    </div>
+                </div>`;
+        }}
         if (t.type === 'error') {{
             return `<div class="threat-item" style="color:#FF6666;border-color:#FF6666;">${{t.text}}</div>`;
         }}
-        return `<div class="threat-item" style="color:${{t.color}};border-color:${{t.color}}">${{t.text}}</div>`;
+        // Threat item with distance and proximity label
+        const prox = t.dist !== undefined ? getProximityLabel(t.dist) : null;
+        return `<div class="threat-item" style="color:${{t.color}};border-color:${{t.color}}40;
+            background:${{t.color}}08;">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+                <span>${{t.text}}</span>
+                ${{prox ? `<span style="font-size:9px;color:${{prox.color}};font-weight:700;
+                    letter-spacing:1px;margin-left:8px;flex-shrink:0;">${{prox.label}}</span>` : ''}}
+            </div>
+            ${{t.dist !== undefined ? `<div style="font-size:9px;color:rgba(255,255,255,0.3);margin-top:2px;">
+                ${{Math.round(t.dist)}} miles away</div>` : ''}}
+        </div>`;
     }}).join('');
 }}
 
