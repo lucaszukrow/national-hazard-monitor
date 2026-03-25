@@ -1882,7 +1882,7 @@ async function searchLocation() {{
             fetch('/api/warnings').then(r => r.json()),
             fetch('/api/earthquakes').then(r => r.json()),
             fetch('/api/fires').then(r => r.json()),
-            fetch('https://mesonet.agron.iastate.edu/geojson/lsr.php?hours=6&wfo=all').then(r => r.json()).then(d => ({type:'FeatureCollection', features: (d.features||[]).filter(f => ['TORNADO','HAIL','TSTM WND GST','TSTM WND DMG','FUNNEL CLOUD','LIGHTNING','FLASH FLOOD'].some(x => (f.properties?.typetext||'').toUpperCase().includes(x)))})),
+            fetch('https://mesonet.agron.iastate.edu/geojson/lsr.php?hours=6&wfo=all').then(r => r.json()).then(d => {{const severe=['TORNADO','HAIL','TSTM WND GST','TSTM WND DMG','FUNNEL CLOUD','LIGHTNING','FLASH FLOOD'];return {{type:'FeatureCollection',features:(d.features||[]).filter(f=>severe.some(x=>(f.properties?.typetext||'').toUpperCase().includes(x)))}};}})),
             fetch('https://services3.arcgis.com/T4QMspbfLg3qTGWY/arcgis/rest/services/WFIGS_Interagency_Perimeters_YTD/FeatureServer/0/query?where=1%3D1&outFields=IncidentName,GISAcres,PercentContained&geometryPrecision=3&outSR=4326&resultRecordCount=500&f=geojson').then(r => r.json()),
         ]);
 
