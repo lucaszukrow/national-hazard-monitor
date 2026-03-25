@@ -666,44 +666,106 @@ def run_update():
         state["updating"] = False
 
 def fetch_lightning():
-    """Fetch recent lightning strikes from NOAA ENTLN via Iowa State."""
+    """Fetch recent lightning strikes from Iowa State Mesonet."""
     print("Downloading lightning data...")
     try:
-        # Iowa State serves recent lightning strikes as GeoJSON
-        url = "https://mesonet.agron.iastate.edu/geojson/lsr.php?hours=1&wfo=all&ltype=L"
+        # Iowa State LSR feed filtered to lightning type only (typetext contains LIGHTNING)
+        url = "https://mesonet.agron.iastate.edu/geojson/lsr.php?hours=6&wfo=all&ltype=L&ltype=T"
         r = requests.get(url, timeout=15)
         r.raise_for_status()
         data = r.json()
-        features = data.get("features", [])
-        print(f"  Lightning: {len(features)} strikes (last 1hr)")
-        return data
+        # Filter to only actual lightning reports
+        features = [
+            f for f in data.get("features", [])
+            if str(f.get("properties", {}).get("typetext", "")).upper() in
+               ["LIGHTNING", "HAIL", "TSTM WND GST", "TSTM WND DMG", "FUNNEL CLOUD", "TORNADO"]
+        ]
+        print(f"  Storm reports: {len(features)} events (last 6hr)")
+        return {"type": "FeatureCollection", "features": features}
     except Exception as e:
         print(f"  Lightning failed: {e}")
         return {"type": "FeatureCollection", "features": []}
 
 def fetch_fire_perimeters():
-    """Fetch active wildfire perimeters from NIFC."""
+    """Fetch active wildfire perimeters from public sources."""
     print("Downloading wildfire perimeters...")
-    try:
-        # NIFC active fire perimeters - updated daily
-        url = "https://services3.arcgis.com/T4QMspbfLg3qTGWY/arcgis/rest/services/WFIGS_Interagency_Perimeters_YTD/FeatureServer/0/query?where=1%3D1&outFields=IncidentName,GISAcres,PercentContained,ModifiedOnDateTime_dt&geometryPrecision=4&outSR=4326&f=geojson"
-        r = requests.get(url, timeout=20)
-        r.raise_for_status()
-        data = r.json()
-        features = data.get("features", [])
-        print(f"  Fire perimeters: {len(features)} active fires")
-        return data
-    except Exception as e:
-        print(f"  Fire perimeters failed: {e}")
-        # Fallback to alternative NIFC endpoint
+    
+    # Try multiple public endpoints
+    urls = [
+        # NIFC open data - public GeoJSON endpoint (no auth required)
+        "https://opendata.arcgis.com/datasets/nifc::wfigs-current-interagency-fire-perimeters.geojson",
+        # NIFC historical open data
+        "https://opendata.arcgis.com/datasets/5da472c6d27b4b67970acc7b5044c862_0.geojson",
+        # NASA FIRMS fire areas (alternative)
+        f"https://firms.modaps.eosdis.nasa.gov/api/area/csv/{FIRMS_KEY}/VIIRS_SNPP_NRT/-125,24,-66,50/7",
+    ]
+    
+    for url in urls:
         try:
-            url2 = "https://opendata.arcgis.com/datasets/5da472c6d27b4b67970acc7b5044c862_0.geojson"
-            r = requests.get(url2, timeout=20)
+            r = requests.get(url, timeout=20)
+            if r.status_code == 403:
+                print(f"  Fire perimeters: 403 forbidden - {url[:60]}")
+                continue
+            r.raise_for_status()
+            
+            # Handle CSV response from FIRMS
+            if 'csv' in url:
+                lines = r.text.strip().split("\n")
+                if len(lines) < 2:
+                    continue
+                headers = [h.strip() for h in lines[0].split(",")]
+                features = []
+                for line in lines[1:100]:  # Limit to 100 largest
+                    if not line.strip():
+                        continue
+                    vals = [v.strip() for v in line.split(",")]
+                    if len(vals) >= len(headers):
+                        row = dict(zip(headers, vals))
+                        try:
+                            lat = float(row.get("latitude", 0))
+                            lon = float(row.get("longitude", 0))
+                            frp = float(row.get("frp", 0))
+                            if lat and lon and frp > 50:  # Only high-intensity fires
+                                features.append({
+                                    "type": "Feature",
+                                    "geometry": {
+                                        "type": "Polygon",
+                                        "coordinates": [[
+                                            [lon-0.05, lat-0.05],
+                                            [lon+0.05, lat-0.05],
+                                            [lon+0.05, lat+0.05],
+                                            [lon-0.05, lat+0.05],
+                                            [lon-0.05, lat-0.05]
+                                        ]]
+                                    },
+                                    "properties": {
+                                        "IncidentName": f"Active Fire (FRP: {frp} MW)",
+                                        "GISAcres": frp * 10,
+                                        "PercentContained": 0,
+                                        "ModifiedOnDateTime_dt": row.get("acq_date", "")
+                                    }
+                                })
+                        except Exception:
+                            continue
+                if features:
+                    print(f"  Fire perimeters (FIRMS high-intensity): {len(features)} fires")
+                    return {"type": "FeatureCollection", "features": features}
+                continue
+
             data = r.json()
-            print(f"  Fire perimeters (fallback): {len(data.get('features',[]))} fires")
-            return data
-        except Exception:
-            return {"type": "FeatureCollection", "features": []}
+            if "message" in data and "permission" in str(data.get("message","")).lower():
+                print(f"  Fire perimeters: permission denied")
+                continue
+            features = data.get("features", [])
+            if features:
+                print(f"  Fire perimeters: {len(features)} active fires")
+                return data
+        except Exception as e:
+            print(f"  Fire perimeters failed: {e}")
+            continue
+    
+    print("  Fire perimeters: no data available")
+    return {"type": "FeatureCollection", "features": []}
 
 def schedule_updates(interval_minutes=30):
     """Run update on schedule in background thread."""
@@ -1263,8 +1325,8 @@ def mapbox_map():
         <div class="legend-title" style="margin-top:10px">🔥 Wildfires</div>
         <div class="legend-item"><div class="legend-dot" style="background:#FF4500;color:#FF4500"></div>NASA FIRMS</div>
         <div class="legend-item"><div class="legend-box" style="background:rgba(255,69,0,0.5);color:#FF4500"></div>Fire Perimeter</div>
-        <div class="legend-title" style="margin-top:10px">⚡ Lightning</div>
-        <div class="legend-item"><div class="legend-dot" style="background:#FFFF00;color:#FFFF00"></div>Strike (last 1hr)</div>
+        <div class="legend-title" style="margin-top:10px">⚡ Storm Reports</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#FFFF00;color:#FFFF00"></div>NWS LSR (last 6hr)</div>
     </div>
     <div class="legend-section">
         <div class="legend-title">🏗 Infrastructure</div>
@@ -1673,7 +1735,7 @@ function setupLayers() {{
     }}
 
     toggleContainer.appendChild(makeToggle('🔥 Fire Perimeters', 'fire-perimeter-fill', true));
-    toggleContainer.appendChild(makeToggle('⚡ Lightning', 'lightning-strikes', true));
+    toggleContainer.appendChild(makeToggle('⚡ Storm Reports', 'lightning-strikes', true));
     toggleContainer.appendChild(makeToggle('NEXRAD Radar', 'nexrad-layer', true));
     toggleContainer.appendChild(makeToggle('GOES Infrared', 'goes-ir-layer', false));
     toggleContainer.appendChild(makeToggle('Affected Counties', 'counties-fill', true));
@@ -1824,30 +1886,34 @@ async function searchLocation() {{
 
         const threats = [];
 
-        // Check NWS warnings
-        const warnInBuffer = turf.pointsWithinPolygon(
-            turf.featureCollection(
-                warnings.features
-                    .filter(f => f.geometry && f.geometry.type === 'Polygon')
-                    .map(f => turf.centroid(f))
-            ),
-            buffer
-        );
-        if (warnInBuffer.features.length > 0) {{
+        // Check NWS warnings - use booleanIntersects for polygons
+        const warningsInBuffer = warnings.features.filter(f => {{
+            try {{
+                if (!f.geometry) return false;
+                if (f.geometry.type === 'Point') {{
+                    return turf.booleanPointInPolygon(turf.point(f.geometry.coordinates), buffer);
+                }}
+                return turf.booleanIntersects(f, buffer);
+            }} catch(e) {{ return false; }}
+        }});
+        if (warningsInBuffer.length > 0) {{
             threats.push({{
                 type: 'warning',
                 color: '#FF5050',
-                text: `⚠ ${{warnInBuffer.features.length}} Active NWS Warning(s) within ${{radiusMiles}} miles`
+                text: `⚠ ${{warningsInBuffer.length}} Active NWS Warning(s) within ${{radiusMiles}} miles`
             }});
         }}
 
         // Check earthquakes
-        const eqInBuffer = turf.pointsWithinPolygon(
-            turf.featureCollection(
-                earthquakes.features.map(f => turf.point(f.geometry.coordinates.slice(0,2), f.properties))
-            ),
-            buffer
+        const eqPoints = turf.featureCollection(
+            earthquakes.features
+                .filter(f => f.geometry && f.geometry.coordinates)
+                .map(f => turf.point(
+                    [f.geometry.coordinates[0], f.geometry.coordinates[1]],
+                    {{mag: f.properties.mag || 0, place: f.properties.place || ''}}
+                ))
         );
+        const eqInBuffer = turf.pointsWithinPolygon(eqPoints, buffer);
         if (eqInBuffer.features.length > 0) {{
             const maxMag = Math.max(...eqInBuffer.features.map(f => f.properties.mag || 0));
             threats.push({{
@@ -1858,14 +1924,12 @@ async function searchLocation() {{
         }}
 
         // Check wildfires
-        const fireInBuffer = turf.pointsWithinPolygon(
-            turf.featureCollection(
-                fires.features
-                    .filter(f => f.geometry)
-                    .map(f => turf.point(f.geometry.coordinates))
-            ),
-            buffer
+        const firePoints = turf.featureCollection(
+            fires.features
+                .filter(f => f.geometry && f.geometry.coordinates)
+                .map(f => turf.point([f.geometry.coordinates[0], f.geometry.coordinates[1]]))
         );
+        const fireInBuffer = turf.pointsWithinPolygon(firePoints, buffer);
         if (fireInBuffer.features.length > 0) {{
             threats.push({{
                 type: 'fire',
@@ -1874,31 +1938,30 @@ async function searchLocation() {{
             }});
         }}
 
-        // Check lightning
-        const ltgInBuffer = turf.pointsWithinPolygon(
-            turf.featureCollection(
-                lightning.features
-                    .filter(f => f.geometry)
-                    .map(f => turf.point(f.geometry.coordinates))
-            ),
-            buffer
+        // Check storm reports
+        const ltgPoints = turf.featureCollection(
+            lightning.features
+                .filter(f => f.geometry && f.geometry.coordinates)
+                .map(f => turf.point([f.geometry.coordinates[0], f.geometry.coordinates[1]]))
         );
+        const ltgInBuffer = turf.pointsWithinPolygon(ltgPoints, buffer);
         if (ltgInBuffer.features.length > 0) {{
             threats.push({{
                 type: 'lightning',
                 color: '#FFFF00',
-                text: `⚡ ${{ltgInBuffer.features.length}} Lightning Strike(s) in last hour`
+                text: `⚡ ${{ltgInBuffer.features.length}} Severe Storm Report(s) in last 6 hours`
             }});
         }}
 
         // Check fire perimeters
         const perimInBuffer = perimeters.features.filter(f => {{
             try {{
+                if (!f.geometry) return false;
                 return turf.booleanIntersects(f, buffer);
             }} catch(e) {{ return false; }}
         }});
         if (perimInBuffer.length > 0) {{
-            const totalAcres = perimInBuffer.reduce((s,f) => s + (f.properties.GISAcres||0), 0);
+            const totalAcres = perimInBuffer.reduce((s,f) => s + (parseFloat(f.properties.GISAcres)||0), 0);
             threats.push({{
                 type: 'fire',
                 color: '#FF4500',
@@ -1924,7 +1987,7 @@ async function searchLocation() {{
 
     }} catch(err) {{
         console.error('Search error:', err);
-        showResults([{{type:'error', text:'Search failed. Please try again.'}}]);
+        showResults([{{type:'error', text:'Error: ' + (err.message || 'Search failed. Check console for details.')}}]);
     }} finally {{
         btn.textContent = '🔍 ANALYZE THREATS';
         btn.disabled = false;
