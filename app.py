@@ -949,6 +949,7 @@ def mapbox_map():
     <title>National Hazard Monitor</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <script src="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
     <link href="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
     <style>
@@ -1109,6 +1110,67 @@ def mapbox_map():
         .mapboxgl-ctrl-group button:hover span {{ filter: invert(1); }}
         .mapboxgl-ctrl-attrib {{ display: none !important; }}
 
+        /* ── ADDRESS SEARCH ── */
+        #address-panel {{
+            position: absolute; bottom: 30px; right: 16px; z-index: 10;
+            background: linear-gradient(135deg, rgba(0,8,20,0.96) 0%, rgba(0,20,40,0.96) 100%);
+            border: 1px solid rgba(0,180,255,0.3); border-radius: 12px;
+            padding: 16px; width: 300px;
+            backdrop-filter: blur(20px);
+            box-shadow: 0 0 30px rgba(0,0,0,0.5);
+        }}
+        #address-panel h4 {{
+            font-size: 10px; color: rgba(0,180,255,0.8); font-weight: 600;
+            letter-spacing: 2px; text-transform: uppercase;
+            margin-bottom: 10px; border-bottom: 1px solid rgba(0,180,255,0.2);
+            padding-bottom: 6px;
+        }}
+        #address-input {{
+            width: 100%; padding: 8px 10px; border-radius: 6px;
+            background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
+            color: white; font-size: 12px; font-family: 'Inter', Arial, sans-serif;
+            outline: none; transition: border-color 0.2s;
+        }}
+        #address-input:focus {{ border-color: rgba(0,180,255,0.5); }}
+        #address-input::placeholder {{ color: rgba(255,255,255,0.3); }}
+        #buffer-row {{
+            display: flex; gap: 8px; margin-top: 8px; align-items: center;
+        }}
+        #buffer-slider {{
+            flex: 1; accent-color: #00B4FF;
+        }}
+        #buffer-label {{
+            font-size: 11px; color: rgba(0,180,255,0.8);
+            min-width: 55px; text-align: right;
+        }}
+        #search-btn {{
+            width: 100%; margin-top: 10px; padding: 8px;
+            background: linear-gradient(135deg, rgba(0,100,200,0.6), rgba(0,50,150,0.6));
+            border: 1px solid rgba(0,180,255,0.4); border-radius: 6px;
+            color: white; font-size: 11px; font-weight: 600;
+            letter-spacing: 1px; text-transform: uppercase;
+            cursor: pointer; transition: all 0.2s;
+        }}
+        #search-btn:hover {{ background: linear-gradient(135deg, rgba(0,120,220,0.8), rgba(0,70,180,0.8)); }}
+        #threat-results {{
+            margin-top: 12px; max-height: 200px; overflow-y: auto;
+            display: none;
+        }}
+        .threat-item {{
+            padding: 6px 8px; margin: 3px 0; border-radius: 6px;
+            font-size: 11px; border-left: 3px solid;
+            background: rgba(255,255,255,0.03);
+        }}
+        .threat-none {{
+            color: rgba(0,255,100,0.8); border-color: #00FF64;
+            text-align: center; padding: 10px;
+        }}
+        #clear-search {{
+            font-size: 10px; color: rgba(255,255,255,0.3); cursor: pointer;
+            text-align: center; margin-top: 8px; display: none;
+        }}
+        #clear-search:hover {{ color: white; }}
+
         /* ── CORNER DECORATIONS ── */
         .corner {{
             position: absolute; width: 20px; height: 20px; z-index: 6;
@@ -1215,6 +1277,20 @@ def mapbox_map():
         <div class="legend-item"><div class="legend-box" style="background:rgba(255,100,0,0.4);color:#FF6400"></div>Low Pop</div>
         <div class="legend-item"><div class="legend-box" style="background:rgba(255,0,0,0.6);color:#FF0000"></div>High Pop</div>
     </div>
+</div>
+
+<!-- Address Search Panel -->
+<div id="address-panel">
+    <h4>📍 Location Threat Analysis</h4>
+    <input id="address-input" type="text" placeholder="Enter address or city...">
+    <div id="buffer-row">
+        <span style="font-size:10px;color:rgba(255,255,255,0.4);">RADIUS</span>
+        <input id="buffer-slider" type="range" min="5" max="200" value="50" step="5">
+        <span id="buffer-label">50 miles</span>
+    </div>
+    <button id="search-btn" onclick="searchLocation()">🔍 ANALYZE THREATS</button>
+    <div id="threat-results"></div>
+    <div id="clear-search" onclick="clearSearch()">✕ Clear search</div>
 </div>
 
 <!-- Popup -->
@@ -1662,6 +1738,227 @@ function setupLayers() {{
 map.on('load', function() {{
     setupLayers();
 }});
+
+// ── ADDRESS SEARCH & THREAT ANALYSIS ─────────────
+const MAPBOX_TOKEN_JS = '{MAPBOX_TOKEN}';
+let searchMarker = null;
+let bufferLayer  = null;
+
+// Update buffer label
+document.getElementById('buffer-slider').addEventListener('input', function() {{
+    document.getElementById('buffer-label').textContent = this.value + ' miles';
+}});
+
+// Enter key triggers search
+document.getElementById('address-input').addEventListener('keypress', function(e) {{
+    if (e.key === 'Enter') searchLocation();
+}});
+
+async function searchLocation() {{
+    const address = document.getElementById('address-input').value.trim();
+    if (!address) return;
+
+    const btn = document.getElementById('search-btn');
+    btn.textContent = '⏳ ANALYZING...';
+    btn.disabled = true;
+
+    try {{
+        // Geocode the address using Mapbox
+        const geo = await fetch(
+            `https://api.mapbox.com/geocoding/v5/mapbox.places/${{encodeURIComponent(address)}}.json?country=US&limit=1&access_token=${{MAPBOX_TOKEN_JS}}`
+        );
+        const geoData = await geo.json();
+
+        if (!geoData.features || geoData.features.length === 0) {{
+            showResults([{{type:'error', text:'Address not found. Try a different search.'}}]);
+            return;
+        }}
+
+        const [lng, lat] = geoData.features[0].center;
+        const placeName  = geoData.features[0].place_name;
+        const radiusMiles = parseFloat(document.getElementById('buffer-slider').value);
+        const radiusKm    = radiusMiles * 1.60934;
+
+        // Fly to location
+        map.flyTo({{ center: [lng, lat], zoom: 7, duration: 1500 }});
+
+        // Remove old marker and buffer
+        clearSearch(false);
+
+        // Add marker at location
+        const el = document.createElement('div');
+        el.style.cssText = `
+            width: 16px; height: 16px; background: #00B4FF;
+            border: 3px solid white; border-radius: 50%;
+            box-shadow: 0 0 20px #00B4FF;
+        `;
+        searchMarker = new mapboxgl.Marker(el).setLngLat([lng, lat]).addTo(map);
+
+        // Create buffer circle using Turf.js
+        const point  = turf.point([lng, lat]);
+        const buffer = turf.circle(point, radiusKm, {{ steps: 64, units: 'kilometers' }});
+
+        // Add buffer to map
+        if (map.getSource('search-buffer')) {{
+            map.getSource('search-buffer').setData(buffer);
+        }} else {{
+            map.addSource('search-buffer', {{ type: 'geojson', data: buffer }});
+            map.addLayer({{
+                id: 'buffer-fill', type: 'fill', source: 'search-buffer',
+                paint: {{ 'fill-color': '#00B4FF', 'fill-opacity': 0.08 }}
+            }});
+            map.addLayer({{
+                id: 'buffer-outline', type: 'line', source: 'search-buffer',
+                paint: {{ 'line-color': '#00B4FF', 'line-width': 2, 'line-dasharray': [4,4] }}
+            }});
+        }}
+
+        // Fetch all hazard data and analyze
+        const [warnings, earthquakes, fires, lightning, perimeters] = await Promise.all([
+            fetch('/api/warnings').then(r => r.json()),
+            fetch('/api/earthquakes').then(r => r.json()),
+            fetch('/api/fires').then(r => r.json()),
+            fetch('/api/lightning').then(r => r.json()),
+            fetch('/api/fire_perimeters').then(r => r.json()),
+        ]);
+
+        const threats = [];
+
+        // Check NWS warnings
+        const warnInBuffer = turf.pointsWithinPolygon(
+            turf.featureCollection(
+                warnings.features
+                    .filter(f => f.geometry && f.geometry.type === 'Polygon')
+                    .map(f => turf.centroid(f))
+            ),
+            buffer
+        );
+        if (warnInBuffer.features.length > 0) {{
+            threats.push({{
+                type: 'warning',
+                color: '#FF5050',
+                text: `⚠ ${{warnInBuffer.features.length}} Active NWS Warning(s) within ${{radiusMiles}} miles`
+            }});
+        }}
+
+        // Check earthquakes
+        const eqInBuffer = turf.pointsWithinPolygon(
+            turf.featureCollection(
+                earthquakes.features.map(f => turf.point(f.geometry.coordinates.slice(0,2), f.properties))
+            ),
+            buffer
+        );
+        if (eqInBuffer.features.length > 0) {{
+            const maxMag = Math.max(...eqInBuffer.features.map(f => f.properties.mag || 0));
+            threats.push({{
+                type: 'earthquake',
+                color: '#00B4FF',
+                text: `🔴 ${{eqInBuffer.features.length}} Earthquake(s) M2.5+ — largest M${{maxMag.toFixed(1)}}`
+            }});
+        }}
+
+        // Check wildfires
+        const fireInBuffer = turf.pointsWithinPolygon(
+            turf.featureCollection(
+                fires.features
+                    .filter(f => f.geometry)
+                    .map(f => turf.point(f.geometry.coordinates))
+            ),
+            buffer
+        );
+        if (fireInBuffer.features.length > 0) {{
+            threats.push({{
+                type: 'fire',
+                color: '#FF5000',
+                text: `🔥 ${{fireInBuffer.features.length}} Wildfire Detection(s) within ${{radiusMiles}} miles`
+            }});
+        }}
+
+        // Check lightning
+        const ltgInBuffer = turf.pointsWithinPolygon(
+            turf.featureCollection(
+                lightning.features
+                    .filter(f => f.geometry)
+                    .map(f => turf.point(f.geometry.coordinates))
+            ),
+            buffer
+        );
+        if (ltgInBuffer.features.length > 0) {{
+            threats.push({{
+                type: 'lightning',
+                color: '#FFFF00',
+                text: `⚡ ${{ltgInBuffer.features.length}} Lightning Strike(s) in last hour`
+            }});
+        }}
+
+        // Check fire perimeters
+        const perimInBuffer = perimeters.features.filter(f => {{
+            try {{
+                return turf.booleanIntersects(f, buffer);
+            }} catch(e) {{ return false; }}
+        }});
+        if (perimInBuffer.length > 0) {{
+            const totalAcres = perimInBuffer.reduce((s,f) => s + (f.properties.GISAcres||0), 0);
+            threats.push({{
+                type: 'fire',
+                color: '#FF4500',
+                text: `🔥 ${{perimInBuffer.length}} Active Fire Perimeter(s) — ${{Math.round(totalAcres).toLocaleString()}} total acres`
+            }});
+        }}
+
+        // Show results
+        document.getElementById('clear-search').style.display = 'block';
+
+        if (threats.length === 0) {{
+            showResults([{{
+                type: 'safe',
+                text: `✅ No active threats within ${{radiusMiles}} miles of ${{placeName.split(',')[0]}}`
+            }}]);
+        }} else {{
+            threats.unshift({{
+                type: 'header',
+                text: `📍 ${{placeName.split(',')[0]}} — ${{radiusMiles}} mile radius`
+            }});
+            showResults(threats);
+        }}
+
+    }} catch(err) {{
+        console.error('Search error:', err);
+        showResults([{{type:'error', text:'Search failed. Please try again.'}}]);
+    }} finally {{
+        btn.textContent = '🔍 ANALYZE THREATS';
+        btn.disabled = false;
+    }}
+}}
+
+function showResults(threats) {{
+    const div = document.getElementById('threat-results');
+    div.style.display = 'block';
+    div.innerHTML = threats.map(t => {{
+        if (t.type === 'safe') {{
+            return `<div class="threat-item threat-none">${{t.text}}</div>`;
+        }}
+        if (t.type === 'header') {{
+            return `<div style="font-size:10px;color:rgba(255,255,255,0.5);margin-bottom:6px;letter-spacing:1px">${{t.text}}</div>`;
+        }}
+        if (t.type === 'error') {{
+            return `<div class="threat-item" style="color:#FF6666;border-color:#FF6666;">${{t.text}}</div>`;
+        }}
+        return `<div class="threat-item" style="color:${{t.color}};border-color:${{t.color}}">${{t.text}}</div>`;
+    }}).join('');
+}}
+
+function clearSearch(resetInput=true) {{
+    if (searchMarker) {{ searchMarker.remove(); searchMarker = null; }}
+    if (map.getLayer('buffer-fill'))    map.removeLayer('buffer-fill');
+    if (map.getLayer('buffer-outline')) map.removeLayer('buffer-outline');
+    if (map.getSource('search-buffer')) map.removeSource('search-buffer');
+    document.getElementById('threat-results').style.display = 'none';
+    document.getElementById('threat-results').innerHTML = '';
+    document.getElementById('clear-search').style.display = 'none';
+    if (resetInput) document.getElementById('address-input').value = '';
+}}
+
 </script>
 </body>
 </html>"""
