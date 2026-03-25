@@ -1804,7 +1804,7 @@ map.on('load', function() {{
 }});
 
 // ── ADDRESS SEARCH & THREAT ANALYSIS ─────────────
-const MAPBOX_TOKEN_JS = '{MAPBOX_TOKEN}';
+const MAPBOX_TOKEN_JS = mapboxgl.accessToken;
 let searchMarker = null;
 let bufferLayer  = null;
 
@@ -1827,10 +1827,12 @@ async function searchLocation() {{
     btn.disabled = true;
 
     try {{
-        // Geocode the address using Mapbox
-        const geo = await fetch(
-            `https://api.mapbox.com/geocoding/v5/mapbox.places/${{encodeURIComponent(address)}}.json?country=US&limit=1&access_token=${{MAPBOX_TOKEN_JS}}`
-        );
+        // Geocode the address using Mapbox - reuse the same token already set
+        const geoUrl = 'https://api.mapbox.com/geocoding/v5/mapbox.places/' +
+            encodeURIComponent(address) +
+            '.json?country=US&limit=1&access_token=' + MAPBOX_TOKEN_JS;
+        const geo = await fetch(geoUrl);
+        if (!geo.ok) throw new Error('Geocoding failed: ' + geo.status);
         const geoData = await geo.json();
 
         if (!geoData.features || geoData.features.length === 0) {{
