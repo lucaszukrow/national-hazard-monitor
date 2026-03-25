@@ -1880,12 +1880,25 @@ async function searchLocation() {{
         }}
 
         // Fetch all hazard data and analyze
+        const empty = {{type:'FeatureCollection',features:[]}};
+        const safeJson = async (url, transform) => {{
+            try {{
+                const r = await fetch(url);
+                if (!r.ok) {{ console.log('API failed:', url, r.status); return empty; }}
+                const d = await r.json();
+                return transform ? transform(d) : d;
+            }} catch(e) {{ console.log('API error:', url, e.message); return empty; }}
+        }};
+
+        const severe = ['TORNADO','HAIL','TSTM WND GST','TSTM WND DMG','FUNNEL CLOUD','LIGHTNING','FLASH FLOOD'];
+
         const [warnings, earthquakes, fires, lightning, perimeters] = await Promise.all([
-            fetch('/api/warnings').then(r => r.json()),
-            fetch('/api/earthquakes').then(r => r.json()),
-            fetch('/api/fires').then(r => r.json()),
-            fetch('https://mesonet.agron.iastate.edu/geojson/lsr.php?hours=6&wfo=all').then(r => r.json()).then(function(d) {{ const severe=['TORNADO','HAIL','TSTM WND GST','TSTM WND DMG','FUNNEL CLOUD','LIGHTNING','FLASH FLOOD']; return {{type:'FeatureCollection',features:(d.features||[]).filter(function(f){{ return severe.some(function(x){{ return (f.properties&&f.properties.typetext||'').toUpperCase().indexOf(x)>=0; }}); }})}}; }}),
-            fetch('https://services3.arcgis.com/T4QMspbfLg3qTGWY/arcgis/rest/services/WFIGS_Interagency_Perimeters_YTD/FeatureServer/0/query?where=1%3D1&outFields=IncidentName,GISAcres,PercentContained&geometryPrecision=3&outSR=4326&resultRecordCount=500&f=geojson').then(r => r.json()),
+            safeJson('/api/warnings'),
+            safeJson('/api/earthquakes'),
+            safeJson('/api/fires'),
+            safeJson('https://mesonet.agron.iastate.edu/geojson/lsr.php?hours=6&wfo=all',
+                d => ({{type:'FeatureCollection', features:(d.features||[]).filter(f => severe.some(x => (f.properties&&f.properties.typetext||'').toUpperCase().indexOf(x)>=0))}})),
+            safeJson('https://services3.arcgis.com/T4QMspbfLg3qTGWY/arcgis/rest/services/WFIGS_Interagency_Perimeters_YTD/FeatureServer/0/query?where=1%3D1&outFields=IncidentName,GISAcres,PercentContained&geometryPrecision=3&outSR=4326&resultRecordCount=200&f=geojson'),
         ]);
 
         const threats = [];
