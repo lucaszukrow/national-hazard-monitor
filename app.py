@@ -1235,6 +1235,41 @@ def mapbox_map():
         }}
         #clear-search:hover {{ color: white; }}
 
+        /* ── NRI PANEL ── */
+        .nri-section {{
+            margin-top: 10px; padding-top: 8px;
+            border-top: 1px solid rgba(255,255,255,0.06);
+        }}
+        .nri-title {{
+            font-size: 9px; color: rgba(0,180,255,0.7);
+            letter-spacing: 2px; text-transform: uppercase;
+            margin-bottom: 8px;
+        }}
+        .nri-score-row {{
+            display: flex; justify-content: space-between;
+            align-items: center; margin: 5px 0;
+            padding: 5px 8px; border-radius: 5px;
+            background: rgba(255,255,255,0.03);
+        }}
+        .nri-label {{ font-size: 10px; color: rgba(255,255,255,0.5); }}
+        .nri-value {{ font-weight: 700; font-size: 12px; }}
+        .nri-bar-wrap {{
+            height: 3px; background: rgba(255,255,255,0.1);
+            border-radius: 2px; margin-top: 3px; overflow: hidden;
+        }}
+        .nri-bar {{ height: 100%; border-radius: 2px; transition: width 0.8s ease; }}
+        .nri-hazards {{
+            display: grid; grid-template-columns: 1fr 1fr;
+            gap: 4px; margin-top: 6px;
+        }}
+        .nri-hazard-item {{
+            padding: 4px 6px; border-radius: 4px;
+            background: rgba(255,255,255,0.03);
+            border-left: 2px solid;
+        }}
+        .nri-hazard-name {{ font-size: 9px; color: rgba(255,255,255,0.4); }}
+        .nri-hazard-val {{ font-size: 11px; font-weight: 600; }}
+
         /* ── CORNER DECORATIONS ── */
         .corner {{
             position: absolute; width: 20px; height: 20px; z-index: 6;
@@ -1818,6 +1853,205 @@ document.getElementById('address-input').addEventListener('keypress', function(e
     if (e.key === 'Enter') searchLocation();
 }});
 
+// ── FEMA NRI LOOKUP ──────────────────────────────
+async function fetchNRI(lat, lng) {{
+    try {{
+        // Get county FIPS from Mapbox reverse geocode
+        const r = await fetch(
+            'https://api.mapbox.com/geocoding/v5/mapbox.places/' +
+            lng + ',' + lat + '.json?types=place,region&access_token=' + MAPBOX_TOKEN_JS
+        );
+        const geo = await r.json();
+        
+        // Extract state and county from context
+        let stateAbbr = '';
+        let countyName = '';
+        for (const feat of (geo.features || [])) {{
+            for (const ctx of (feat.context || [])) {{
+                if (ctx.id.startsWith('region')) stateAbbr = ctx.short_code?.replace('US-','') || '';
+            }}
+            if (feat.place_type?.includes('place')) {{
+                countyName = feat.text || '';
+            }}
+        }}
+        
+        if (!stateAbbr) return null;
+        
+        // Query OpenFEMA NRI API
+        // First fetch 1 record to discover actual field names
+        const nriSampleUrl = 'https://www.fema.gov/api/open/v1/NationalRiskIndexCounties?$top=1&$format=json';
+        const nriSampleR = await fetch(nriSampleUrl);
+        if (!nriSampleR.ok) {{ console.log('NRI API failed:', nriSampleR.status); return null; }}
+        const nriSample = await nriSampleR.json();
+        
+        // Get the entity name from metadata to find the correct array key
+        const entityName = nriSample.metadata?.entityname || 'NationalRiskIndexCounties';
+        const sampleRecords = nriSample[entityName] || [];
+        
+        if (!sampleRecords.length) {{
+            console.log('NRI API returned no records, keys:', Object.keys(nriSample));
+            return null;
+        }}
+        
+        // Discover field names from sample record
+        const sampleKeys = Object.keys(sampleRecords[0]);
+        console.log('NRI fields available:', sampleKeys.slice(0,20));
+        
+        // Find field names by pattern matching
+        const findField = (patterns) => sampleKeys.find(k => 
+            patterns.some(p => k.toLowerCase().includes(p.toLowerCase()))
+        );
+        
+        const countyField = findField(['county']) || 'county';
+        const stateField  = findField(['state']) || 'state';
+        const riskScoreField  = findField(['riskScore', 'risk_score', 'RISK_SCORE']) || 'riskScore';
+        const riskRatingField = findField(['riskRating', 'risk_rating', 'RISK_RATNG']) || 'riskRating';
+        const soviScoreField  = findField(['socialVulnerabilityScore', 'sovi_score', 'SOVI_SCORE']) || 'socialVulnerabilityScore';
+        const soviRatingField = findField(['socialVulnerabilityRating', 'sovi_rating']) || 'socialVulnerabilityRating';
+        const reslScoreField  = findField(['communityResilienceScore', 'resl_score']) || 'communityResilienceScore';
+        const reslRatingField = findField(['communityResilienceRating', 'resl_rating']) || 'communityResilienceRating';
+        const ealField        = findField(['expectedAnnualLoss', 'eal_valt', 'EAL_VALT']) || 'expectedAnnualLoss';
+        
+        // Now fetch county data with state filter
+        const nriUrl = 'https://www.fema.gov/api/open/v1/NationalRiskIndexCounties?' +
+            '$filter=' + stateField + ' eq %27' + stateAbbr + '%27' +
+            '&$top=200&$format=json';
+
+        const nriR = await fetch(nriUrl);
+        if (!nriR.ok) {{ console.log('NRI county fetch failed:', nriR.status); return null; }}
+        const nriData = await nriR.json();
+
+        const records = nriData[entityName] || [];
+        if (!records.length) {{ console.log('NRI: no records for state', stateAbbr); return null; }}
+
+        console.log('NRI records for', stateAbbr, ':', records.length);
+
+        // Find best matching county
+        const match = records.find(r =>
+            (r[countyField] || '').toLowerCase().includes(countyName.toLowerCase())
+        ) || records[0];
+
+        console.log('NRI matched county:', match[countyField]);
+
+        // Normalize to standard field names for display
+        const getHazard = (patterns) => {{
+            const f = findField(patterns);
+            return f ? (parseFloat(match[f]) || 0) : 0;
+        }};
+
+        return {{
+            COUNTY:     match[countyField],
+            STATE:      match[stateField],
+            RISK_SCORE: parseFloat(match[riskScoreField]) || 0,
+            RISK_RATNG: match[riskRatingField] || '',
+            SOVI_SCORE: parseFloat(match[soviScoreField]) || 0,
+            SOVI_RATNG: match[soviRatingField] || '',
+            RESL_SCORE: parseFloat(match[reslScoreField]) || 0,
+            RESL_RATNG: match[reslRatingField] || '',
+            EAL_VALT:   parseFloat(match[ealField]) || 0,
+            TRND_EALT:  getHazard(['tornado']),
+            WFIR_EALT:  getHazard(['wildfire']),
+            ERQK_EALT:  getHazard(['earthquake']),
+            RFLD_EALT:  getHazard(['riverine', 'river', 'flood']),
+            HRCN_EALT:  getHazard(['hurricane']),
+            ISTM_EALT:  getHazard(['iceStorm', 'ice_storm']),
+            LTNG_EALT:  getHazard(['lightning']),
+            HAIL_EALT:  getHazard(['hail']),
+        }};
+    }} catch(e) {{
+        console.log('NRI fetch failed:', e);
+        return null;
+    }}
+}}
+
+function getRatingColor(rating) {{
+    const r = (rating || '').toLowerCase();
+    if (r.includes('very high'))      return '#FF0000';
+    if (r.includes('relatively high')) return '#FF6600';
+    if (r.includes('high'))           return '#FF4400';
+    if (r.includes('relatively mod')) return '#FFCC00';
+    if (r.includes('moderate'))       return '#FFFF00';
+    if (r.includes('relatively low')) return '#88FF00';
+    if (r.includes('low'))            return '#00FF88';
+    return '#888888';
+}}
+
+function formatDollars(val) {{
+    if (!val || val <= 0) return 'N/A';
+    if (val >= 1e9) return '$' + (val/1e9).toFixed(1) + 'B/yr';
+    if (val >= 1e6) return '$' + (val/1e6).toFixed(1) + 'M/yr';
+    if (val >= 1e3) return '$' + (val/1e3).toFixed(0) + 'K/yr';
+    return '$' + Math.round(val);
+}}
+
+function buildNRIPanel(nri, countyName) {{
+    if (!nri) return '';
+    
+    const riskColor  = getRatingColor(nri.RISK_RATNG);
+    const soviColor  = getRatingColor(nri.SOVI_RATNG);
+    const reslColor  = getRatingColor(nri.RESL_RATNG);
+    // Resilience is inverse - low resilience = high risk
+    const reslRisk   = 100 - (nri.RESL_SCORE || 50);
+    
+    const hazards = [
+        {{ name: 'Tornado',    val: nri.TRND_EALT, color: '#FF0000' }},
+        {{ name: 'Wildfire',   val: nri.WFIR_EALT, color: '#FF4500' }},
+        {{ name: 'Earthquake', val: nri.ERQK_EALT, color: '#00B4FF' }},
+        {{ name: 'Riv. Flood', val: nri.RFLD_EALT, color: '#0088FF' }},
+        {{ name: 'Hurricane',  val: nri.HRCN_EALT, color: '#FF6600' }},
+        {{ name: 'Ice Storm',  val: nri.ISTM_EALT, color: '#AAAAFF' }},
+        {{ name: 'Lightning',  val: nri.LTNG_EALT, color: '#FFFF00' }},
+        {{ name: 'Hail',       val: nri.HAIL_EALT, color: '#88FFFF' }},
+    ].filter(h => h.val > 0).sort((a,b) => b.val - a.val).slice(0, 6);
+
+    return `
+    <div class="nri-section">
+        <div class="nri-title">🏛 FEMA National Risk Index — ${{nri.COUNTY || countyName}} Co.</div>
+        
+        <div class="nri-score-row">
+            <div>
+                <div class="nri-label">OVERALL RISK</div>
+                <div class="nri-bar-wrap" style="width:120px;margin-top:4px">
+                    <div class="nri-bar" style="width:${{nri.RISK_SCORE||0}}%;background:${{riskColor}}"></div>
+                </div>
+            </div>
+            <div style="text-align:right">
+                <div class="nri-value" style="color:${{riskColor}}">${{(nri.RISK_SCORE||0).toFixed(1)}}</div>
+                <div style="font-size:9px;color:${{riskColor}};letter-spacing:1px">${{(nri.RISK_RATNG||'N/A').toUpperCase()}}</div>
+            </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;margin:6px 0">
+            <div class="nri-score-row" style="flex-direction:column;align-items:flex-start">
+                <div class="nri-label">SOCIAL VULNERABILITY</div>
+                <div class="nri-value" style="color:${{soviColor}}">${{(nri.SOVI_SCORE||0).toFixed(1)}} <span style="font-size:9px;opacity:0.7">/100</span></div>
+                <div style="font-size:9px;color:${{soviColor}}">${{(nri.SOVI_RATNG||'N/A').toUpperCase()}}</div>
+            </div>
+            <div class="nri-score-row" style="flex-direction:column;align-items:flex-start">
+                <div class="nri-label">COMMUNITY RESILIENCE</div>
+                <div class="nri-value" style="color:${{reslColor}}">${{(nri.RESL_SCORE||0).toFixed(1)}} <span style="font-size:9px;opacity:0.7">/100</span></div>
+                <div style="font-size:9px;color:${{reslColor}}">${{(nri.RESL_RATNG||'N/A').toUpperCase()}}</div>
+            </div>
+        </div>
+
+        <div class="nri-score-row">
+            <div class="nri-label">EXPECTED ANNUAL LOSS</div>
+            <div class="nri-value" style="color:#FFD700">${{formatDollars(nri.EAL_VALT)}}</div>
+        </div>
+
+        ${{hazards.length ? `
+        <div class="nri-title" style="margin-top:8px">TOP HAZARD LOSSES/YR</div>
+        <div class="nri-hazards">
+            ${{hazards.map(h => `
+                <div class="nri-hazard-item" style="border-color:${{h.color}}">
+                    <div class="nri-hazard-name">${{h.name}}</div>
+                    <div class="nri-hazard-val" style="color:${{h.color}}">${{formatDollars(h.val)}}</div>
+                </div>
+            `).join('')}}
+        </div>` : ''}}
+    </div>`;
+}}
+
 async function searchLocation() {{
     const address = document.getElementById('address-input').value.trim();
     if (!address) return;
@@ -1847,6 +2081,9 @@ async function searchLocation() {{
 
         // Fly to location
         map.flyTo({{ center: [lng, lat], zoom: 7, duration: 1500 }});
+        
+        // Fetch FEMA NRI data in parallel
+        const nriPromise = fetchNRI(lat, lng);
 
         // Remove old marker and buffer
         clearSearch(false);
@@ -2081,16 +2318,22 @@ async function searchLocation() {{
         document.getElementById('clear-search').style.display = 'block';
         const locationLabel = placeName.split(',').slice(0,2).join(',');
 
+        // Wait for NRI data
+        const nriData = await nriPromise;
+        const nriHtml = buildNRIPanel(nriData, locationLabel.split(',')[0]);
+
         if (threats.length === 0) {{
             showResults([
                 {{ type: 'score', score: 0 }},
-                {{ type: 'safe', text: `✅ No active threats detected within ${{radiusMiles}} miles of ${{locationLabel}}` }}
+                {{ type: 'safe', text: `✅ No active threats detected within ${{radiusMiles}} miles of ${{locationLabel}}` }},
+                {{ type: 'nri', html: nriHtml }}
             ]);
         }} else {{
             showResults([
                 {{ type: 'header', text: `📍 ${{locationLabel}} · ${{radiusMiles}}mi radius` }},
                 {{ type: 'score', score: totalScore }},
-                ...threats
+                ...threats,
+                {{ type: 'nri', html: nriHtml }}
             ]);
         }}
 
@@ -2168,6 +2411,9 @@ function showResults(threats) {{
                             border-radius:4px;transition:width 0.8s ease;"></div>
                     </div>
                 </div>`;
+        }}
+        if (t.type === 'nri') {{
+            return t.html || '';
         }}
         if (t.type === 'error') {{
             return `<div class="threat-item" style="color:#FF6666;border-color:#FF6666;">${{t.text}}</div>`;
