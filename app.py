@@ -264,8 +264,34 @@ def get_warning_bounds(warnings_geojson):
             continue
     return bounds_list
 
+def bboxes_overlap(bbox1, bbox2):
+    """Check if two bounding boxes overlap."""
+    return not (bbox1["maxlon"] < bbox2["minlon"] or
+                bbox1["minlon"] > bbox2["maxlon"] or
+                bbox1["maxlat"] < bbox2["minlat"] or
+                bbox1["minlat"] > bbox2["maxlat"])
+
+def get_feature_bbox(coords):
+    """Get bounding box of a GeoJSON geometry."""
+    all_pts = []
+    def flatten(c):
+        if not c:
+            return
+        if isinstance(c[0], (int, float)):
+            all_pts.append(c)
+        else:
+            for item in c:
+                flatten(item)
+    flatten(coords)
+    if not all_pts:
+        return None
+    lons = [p[0] for p in all_pts]
+    lats = [p[1] for p in all_pts]
+    return {"minlon": min(lons), "maxlon": max(lons),
+            "minlat": min(lats), "maxlat": max(lats)}
+
 def find_affected_counties(warnings_geojson, pop_data, counties_geojson):
-    """Find counties intersecting warning polygons using bounding box check."""
+    """Find counties intersecting warning polygons using bbox overlap."""
     if not counties_geojson or not warnings_geojson:
         return [], 0
 
@@ -282,37 +308,24 @@ def find_affected_counties(warnings_geojson, pop_data, counties_geojson):
             fips  = feat.get("id", "")
             if fips in seen_fips:
                 continue
-            props = feat.get("properties", {})
-            geom  = feat.get("geometry", {})
-            coords = geom.get("coordinates", [])
+            props  = feat.get("properties", {})
+            coords = feat.get("geometry", {}).get("coordinates", [])
             if not coords:
                 continue
 
-            # Get county centroid approx
-            all_pts = []
-            def flatten(c):
-                if isinstance(c[0], (int, float)):
-                    all_pts.append(c)
-                else:
-                    for item in c:
-                        flatten(item)
-            flatten(coords)
-            if not all_pts:
+            county_bbox = get_feature_bbox(coords)
+            if not county_bbox:
                 continue
 
-            clon = sum(p[0] for p in all_pts) / len(all_pts)
-            clat = sum(p[1] for p in all_pts) / len(all_pts)
-
             for bounds in warning_bounds:
-                if point_in_bbox(clon, clat, bounds):
-                    state_code  = fips[:2]
-                    county_code = fips[2:]
+                if bboxes_overlap(county_bbox, bounds):
+                    state_code = fips[:2]
                     pop = pop_data.get(fips, 0)
                     total_pop += pop
                     seen_fips.add(fips)
-                    w_props = bounds["props"]
-                    phenom  = w_props.get("phenom", "")
-                    sig     = w_props.get("sig", "")
+                    w_props  = bounds["props"]
+                    phenom   = w_props.get("phenom", "")
+                    sig      = w_props.get("sig", "")
                     sig_name = {"W":"Warning","A":"Watch","Y":"Advisory","S":"Statement"}.get(str(sig).strip(), str(sig))
                     affected.append({
                         "county":     props.get("NAME", "Unknown"),
@@ -766,75 +779,78 @@ def api_counties():
 
 @app.server.route("/api/infrastructure")
 def api_infrastructure():
-    """Returns infrastructure points as GeoJSON with type labels."""
+    """Returns infrastructure near warning areas as GeoJSON."""
     features = []
-    # Fetch infrastructure from OpenStreetMap Overpass API
-    infra_queries = {
-        "hospital":     '[out:json][timeout:25];node["amenity"="hospital"](-125,24,-66,50);out body;',
-        "fire_station": '[out:json][timeout:25];node["amenity"="fire_station"](-125,24,-66,50);out body;',
-        "power_plant":  '[out:json][timeout:25];node["power"="plant"](-125,24,-66,50);out body;',
-        "school":       '[out:json][timeout:25];node["amenity"="school"](-125,24,-66,50);out body;'
-    }
-    infra_colors = {
-        "hospital":     "#FF0066",
-        "fire_station": "#FF4400",
-        "power_plant":  "#FFD700",
-        "school":       "#00FF88"
-    }
-    infra_icons = {
-        "hospital":     "🏥",
-        "fire_station": "🚒",
-        "power_plant":  "⚡",
-        "school":       "🏫"
-    }
+    warning_bounds = get_warning_bounds(state["warnings"])
+    
+    if not warning_bounds:
+        return flask_module.Response(
+            json.dumps({"type": "FeatureCollection", "features": []}),
+            mimetype="application/json",
+            headers={"Access-Control-Allow-Origin": "*"}
+        )
 
-    # Check if we have cached infrastructure in state
-    cached_infra = state.get("infrastructure_cache", {})
+    # Build a single expanded bounding box covering all warnings
+    all_minlon = min(b["minlon"] for b in warning_bounds) - 1.0
+    all_maxlon = max(b["maxlon"] for b in warning_bounds) + 1.0
+    all_minlat = min(b["minlat"] for b in warning_bounds) - 1.0
+    all_maxlat = max(b["maxlat"] for b in warning_bounds) + 1.0
 
-    for infra_type, query in infra_queries.items():
-        if infra_type in cached_infra:
-            items = cached_infra[infra_type]
-        else:
-            try:
-                r = requests.post(
-                    "https://overpass-api.de/api/interpreter",
-                    data={"data": query}, timeout=20
-                )
-                items = r.json().get("elements", [])
-                if not state.get("infrastructure_cache"):
-                    state["infrastructure_cache"] = {}
-                state["infrastructure_cache"][infra_type] = items
-            except Exception:
-                items = []
+    infra_types = [
+        ("amenity", "hospital",     "hospital",     "#FF0066", "🏥"),
+        ("amenity", "fire_station", "fire_station",  "#FF4400", "🚒"),
+        ("power",   "plant",        "power_plant",   "#FFD700", "⚡"),
+        ("amenity", "school",       "school",        "#00FF88", "🏫"),
+    ]
 
-        # Check if this infrastructure is inside a warning zone
-        warning_bounds = get_warning_bounds(state["warnings"])
+    cache_key = f"{all_minlon:.1f},{all_minlat:.1f},{all_maxlon:.1f},{all_maxlat:.1f}"
+    if state.get("infra_cache_key") == cache_key and state.get("infra_features"):
+        return flask_module.Response(
+            json.dumps({"type": "FeatureCollection", "features": state["infra_features"]}),
+            mimetype="application/json",
+            headers={"Access-Control-Allow-Origin": "*"}
+        )
 
-        for item in items[:5000]:  # Limit for performance
-            lat = item.get("lat")
-            lon = item.get("lon")
-            if not lat or not lon:
-                continue
-            at_risk = any(
-                point_in_bbox(lon, lat, b) for b in warning_bounds
+    bbox_str = f"{all_minlat},{all_minlon},{all_maxlat},{all_maxlon}"
+    
+    for tag_key, tag_val, infra_type, color, icon in infra_types:
+        query = f'[out:json][timeout:15];node["{tag_key}"="{tag_val}"]({bbox_str});out body;'
+        try:
+            r = requests.post(
+                "https://overpass-api.de/api/interpreter",
+                data={"data": query}, timeout=15
             )
-            features.append({
-                "type": "Feature",
-                "geometry": {"type": "Point", "coordinates": [lon, lat]},
-                "properties": {
-                    "type":    infra_type,
-                    "name":    item.get("tags", {}).get("name", infra_type.replace("_", " ").title()),
-                    "color":   infra_colors[infra_type],
-                    "icon":    infra_icons[infra_type],
-                    "at_risk": at_risk
-                }
-            })
+            items = r.json().get("elements", [])
+            for item in items[:500]:
+                lat = item.get("lat")
+                lon = item.get("lon")
+                if not lat or not lon:
+                    continue
+                at_risk = any(point_in_bbox(lon, lat, b) for b in warning_bounds)
+                features.append({
+                    "type": "Feature",
+                    "geometry": {"type": "Point", "coordinates": [lon, lat]},
+                    "properties": {
+                        "type":    infra_type,
+                        "name":    item.get("tags", {}).get("name", infra_type.replace("_", " ").title()),
+                        "color":   color,
+                        "icon":    icon,
+                        "at_risk": at_risk
+                    }
+                })
+        except Exception as e:
+            print(f"  Overpass {infra_type} failed: {e}")
+            continue
+
+    state["infra_cache_key"] = cache_key
+    state["infra_features"]  = features
 
     return flask_module.Response(
         json.dumps({"type": "FeatureCollection", "features": features}),
         mimetype="application/json",
         headers={"Access-Control-Allow-Origin": "*"}
     )
+
 
 @app.server.route("/mapbox")
 def mapbox_map():
