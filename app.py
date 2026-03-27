@@ -1000,6 +1000,15 @@ def api_fire_perimeters():
         headers={"Access-Control-Allow-Origin": "*"}
     )
 
+@app.server.route("/static/nri_counties.json")
+def serve_nri_counties():
+    """Serves the pre-built FEMA NRI county lookup table."""
+    return flask_module.send_from_directory(
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static'),
+        'nri_counties.json',
+        mimetype='application/json'
+    )
+
 @app.server.route("/mapbox")
 def mapbox_map():
     """Serves the full Mapbox GL JS map page."""
@@ -1854,114 +1863,70 @@ document.getElementById('address-input').addEventListener('keypress', function(e
 }});
 
 // ── FEMA NRI LOOKUP ──────────────────────────────
-async function fetchNRI(lat, lng) {{
+// Loaded once on first search, then cached for all subsequent lookups.
+let _nriData = null;
+
+async function _loadNRI() {{
+    if (_nriData) return _nriData;
     try {{
-        // Get county FIPS from Mapbox reverse geocode
-        const r = await fetch(
-            'https://api.mapbox.com/geocoding/v5/mapbox.places/' +
-            lng + ',' + lat + '.json?types=place,region&access_token=' + MAPBOX_TOKEN_JS
-        );
-        const geo = await r.json();
-        
-        // Extract state and county from context
-        let stateAbbr = '';
-        let countyName = '';
-        for (const feat of (geo.features || [])) {{
-            for (const ctx of (feat.context || [])) {{
-                if (ctx.id.startsWith('region')) stateAbbr = ctx.short_code?.replace('US-','') || '';
-            }}
-            if (feat.place_type?.includes('place')) {{
-                countyName = feat.text || '';
-            }}
-        }}
-        
-        if (!stateAbbr) return null;
-        
-        // Query OpenFEMA NRI API
-        // First fetch 1 record to discover actual field names
-        const nriSampleUrl = 'https://www.fema.gov/api/open/v1/NationalRiskIndexCounties?$top=1&$format=json';
-        const nriSampleR = await fetch(nriSampleUrl);
-        if (!nriSampleR.ok) {{ console.log('NRI API failed:', nriSampleR.status); return null; }}
-        const nriSample = await nriSampleR.json();
-        
-        // Get the entity name from metadata to find the correct array key
-        const entityName = nriSample.metadata?.entityname || 'NationalRiskIndexCounties';
-        const sampleRecords = nriSample[entityName] || [];
-        
-        if (!sampleRecords.length) {{
-            console.log('NRI API returned no records, keys:', Object.keys(nriSample));
-            return null;
-        }}
-        
-        // Discover field names from sample record
-        const sampleKeys = Object.keys(sampleRecords[0]);
-        console.log('NRI fields available:', sampleKeys.slice(0,20));
-        
-        // Find field names by pattern matching
-        const findField = (patterns) => sampleKeys.find(k => 
-            patterns.some(p => k.toLowerCase().includes(p.toLowerCase()))
-        );
-        
-        const countyField = findField(['county']) || 'county';
-        const stateField  = findField(['state']) || 'state';
-        const riskScoreField  = findField(['riskScore', 'risk_score', 'RISK_SCORE']) || 'riskScore';
-        const riskRatingField = findField(['riskRating', 'risk_rating', 'RISK_RATNG']) || 'riskRating';
-        const soviScoreField  = findField(['socialVulnerabilityScore', 'sovi_score', 'SOVI_SCORE']) || 'socialVulnerabilityScore';
-        const soviRatingField = findField(['socialVulnerabilityRating', 'sovi_rating']) || 'socialVulnerabilityRating';
-        const reslScoreField  = findField(['communityResilienceScore', 'resl_score']) || 'communityResilienceScore';
-        const reslRatingField = findField(['communityResilienceRating', 'resl_rating']) || 'communityResilienceRating';
-        const ealField        = findField(['expectedAnnualLoss', 'eal_valt', 'EAL_VALT']) || 'expectedAnnualLoss';
-        
-        // Now fetch county data with state filter
-        const nriUrl = 'https://www.fema.gov/api/open/v1/NationalRiskIndexCounties?' +
-            '$filter=' + stateField + ' eq %27' + stateAbbr + '%27' +
-            '&$top=200&$format=json';
-
-        const nriR = await fetch(nriUrl);
-        if (!nriR.ok) {{ console.log('NRI county fetch failed:', nriR.status); return null; }}
-        const nriData = await nriR.json();
-
-        const records = nriData[entityName] || [];
-        if (!records.length) {{ console.log('NRI: no records for state', stateAbbr); return null; }}
-
-        console.log('NRI records for', stateAbbr, ':', records.length);
-
-        // Find best matching county
-        const match = records.find(r =>
-            (r[countyField] || '').toLowerCase().includes(countyName.toLowerCase())
-        ) || records[0];
-
-        console.log('NRI matched county:', match[countyField]);
-
-        // Normalize to standard field names for display
-        const getHazard = (patterns) => {{
-            const f = findField(patterns);
-            return f ? (parseFloat(match[f]) || 0) : 0;
-        }};
-
-        return {{
-            COUNTY:     match[countyField],
-            STATE:      match[stateField],
-            RISK_SCORE: parseFloat(match[riskScoreField]) || 0,
-            RISK_RATNG: match[riskRatingField] || '',
-            SOVI_SCORE: parseFloat(match[soviScoreField]) || 0,
-            SOVI_RATNG: match[soviRatingField] || '',
-            RESL_SCORE: parseFloat(match[reslScoreField]) || 0,
-            RESL_RATNG: match[reslRatingField] || '',
-            EAL_VALT:   parseFloat(match[ealField]) || 0,
-            TRND_EALT:  getHazard(['tornado']),
-            WFIR_EALT:  getHazard(['wildfire']),
-            ERQK_EALT:  getHazard(['earthquake']),
-            RFLD_EALT:  getHazard(['riverine', 'river', 'flood']),
-            HRCN_EALT:  getHazard(['hurricane']),
-            ISTM_EALT:  getHazard(['iceStorm', 'ice_storm']),
-            LTNG_EALT:  getHazard(['lightning']),
-            HAIL_EALT:  getHazard(['hail']),
-        }};
+        const r = await fetch('/static/nri_counties.json');
+        if (!r.ok) {{ console.log('NRI load failed:', r.status); return null; }}
+        _nriData = await r.json();
+        console.log('NRI loaded:', Object.keys(_nriData).length, 'counties');
+        return _nriData;
     }} catch(e) {{
-        console.log('NRI fetch failed:', e);
+        console.log('NRI load error:', e);
         return null;
     }}
+}}
+
+async function fetchNRI(stateAbbr, countyName) {{
+    if (!stateAbbr) return null;
+    const data = await _loadNRI();
+    if (!data) return null;
+
+    const norm = s => (s || '').toLowerCase()
+        .replace(/ county$/, '').replace(/ parish$/, '')
+        .replace(/ borough$/, '').replace(/ census area$/, '').trim();
+
+    const targetState  = stateAbbr.toUpperCase();
+    const targetCounty = norm(countyName);
+
+    let match = null;
+    // Exact match first
+    for (const d of Object.values(data)) {{
+        if (d.sa === targetState && norm(d.co) === targetCounty) {{ match = d; break; }}
+    }}
+    // Partial fallback
+    if (!match && targetCounty) {{
+        for (const d of Object.values(data)) {{
+            if (d.sa === targetState) {{
+                const c = norm(d.co);
+                if (c.includes(targetCounty) || targetCounty.includes(c)) {{ match = d; break; }}
+            }}
+        }}
+    }}
+    if (!match) {{ console.log('NRI: no match for', targetState, targetCounty); return null; }}
+
+    return {{
+        COUNTY:    match.co,
+        STATE:     match.sa,
+        RISK_SCORE: match.rs || 0,
+        RISK_RATNG: match.rr || '',
+        SOVI_SCORE: match.ss || 0,
+        SOVI_RATNG: match.sr || '',
+        RESL_SCORE: match.ls || 0,
+        RESL_RATNG: match.lr || '',
+        EAL_VALT:  match.ev || 0,
+        TRND_EALT: match.to || 0,
+        WFIR_EALT: match.wf || 0,
+        ERQK_EALT: match.eq || 0,
+        RFLD_EALT: match.fl || 0,
+        HRCN_EALT: match.hu || 0,
+        ISTM_EALT: match.is || 0,
+        LTNG_EALT: match.lt || 0,
+        HAIL_EALT: match.ha || 0,
+    }};
 }}
 
 function getRatingColor(rating) {{
@@ -2076,14 +2041,20 @@ async function searchLocation() {{
 
         const [lng, lat] = geoData.features[0].center;
         const placeName  = geoData.features[0].place_name;
+        const context    = geoData.features[0].context || [];
+        let nriState = '', nriCounty = '';
+        for (const ctx of context) {{
+            if (ctx.id.startsWith('region'))   nriState  = (ctx.short_code || '').replace('US-', '');
+            if (ctx.id.startsWith('district')) nriCounty = ctx.text || '';
+        }}
         const radiusMiles = parseFloat(document.getElementById('buffer-slider').value);
         const radiusKm    = radiusMiles * 1.60934;
 
         // Fly to location
         map.flyTo({{ center: [lng, lat], zoom: 7, duration: 1500 }});
-        
-        // Fetch FEMA NRI data in parallel
-        const nriPromise = fetchNRI(lat, lng);
+
+        // Fetch FEMA NRI data in parallel (local lookup, no extra API call)
+        const nriPromise = fetchNRI(nriState, nriCounty);
 
         // Remove old marker and buffer
         clearSearch(false);
