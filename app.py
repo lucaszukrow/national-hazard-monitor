@@ -33,7 +33,7 @@ NWS_URL      = "https://mapservices.weather.noaa.gov/eventdriven/rest/services/W
 SPC_URL      = "https://www.spc.noaa.gov/products/outlook/day1otlk_cat.nolyr.geojson"
 USGS_EQ_URL  = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_day.geojson"
 NHC_URL      = "https://www.nhc.noaa.gov/CurrentStorms.json"
-FIRMS_KEY    = "9979055d64039403128c5f82c0997133"
+FIRMS_KEY    = os.environ.get("FIRMS_KEY", "")
 FIRMS_URL    = f"https://firms.modaps.eosdis.nasa.gov/api/area/csv/{FIRMS_KEY}/VIIRS_SNPP_NRT/-125,24,-66,50/2"
 CENSUS_URL   = "https://www2.census.gov/programs-surveys/popest/datasets/2020-2023/counties/totals/co-est2023-alldata.csv"
 COUNTIES_URL = "https://raw.githubusercontent.com/plotly/datasets/master/geojson-counties-fips.json"
@@ -2456,6 +2456,10 @@ function clearSearch(resetInput=true) {{
         "connect-src *; "
         "worker-src blob: *;"
     )
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "SAMEORIGIN"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
     return response
 
 app.layout = html.Div(
