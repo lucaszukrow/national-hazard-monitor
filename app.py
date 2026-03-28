@@ -687,83 +687,29 @@ def fetch_lightning():
         return {"type": "FeatureCollection", "features": []}
 
 def fetch_fire_perimeters():
-    """Fetch active wildfire perimeters from public sources."""
+    """Fetch active wildfire perimeters from NIFC WFIGS via ArcGIS REST."""
     print("Downloading wildfire perimeters...")
-    
-    # Try multiple public endpoints
     urls = [
-        # NIFC open data - public GeoJSON endpoint (no auth required)
-        "https://opendata.arcgis.com/datasets/nifc::wfigs-current-interagency-fire-perimeters.geojson",
-        # NIFC historical open data
-        "https://opendata.arcgis.com/datasets/5da472c6d27b4b67970acc7b5044c862_0.geojson",
-        # NASA FIRMS fire areas (alternative)
-        f"https://firms.modaps.eosdis.nasa.gov/api/area/csv/{FIRMS_KEY}/VIIRS_SNPP_NRT/-125,24,-66,50/7",
+        # NIFC WFIGS current-year interagency perimeters (primary — live REST endpoint)
+        "https://services3.arcgis.com/T4QMspbfLg3qTGWY/arcgis/rest/services/WFIGS_Interagency_Perimeters_YTD/FeatureServer/0/query?where=1%3D1&outFields=IncidentName,GISAcres,PercentContained,ModifiedOnDateTime_dt&geometryPrecision=3&outSR=4326&resultRecordCount=500&f=geojson",
+        # NIFC current fires (backup)
+        "https://services9.arcgis.com/RHVPKKiFTONKtxq3/arcgis/rest/services/USA_Wildfires_v1/FeatureServer/0/query?where=1%3D1&outFields=IncidentName,GISAcres,PercentContained&geometryPrecision=3&outSR=4326&resultRecordCount=300&f=geojson",
     ]
-    
     for url in urls:
         try:
-            r = requests.get(url, timeout=20)
-            if r.status_code == 403:
-                print(f"  Fire perimeters: 403 forbidden - {url[:60]}")
-                continue
+            r = requests.get(url, timeout=30)
             r.raise_for_status()
-            
-            # Handle CSV response from FIRMS
-            if 'csv' in url:
-                lines = r.text.strip().split("\n")
-                if len(lines) < 2:
-                    continue
-                headers = [h.strip() for h in lines[0].split(",")]
-                features = []
-                for line in lines[1:100]:  # Limit to 100 largest
-                    if not line.strip():
-                        continue
-                    vals = [v.strip() for v in line.split(",")]
-                    if len(vals) >= len(headers):
-                        row = dict(zip(headers, vals))
-                        try:
-                            lat = float(row.get("latitude", 0))
-                            lon = float(row.get("longitude", 0))
-                            frp = float(row.get("frp", 0))
-                            if lat and lon and frp > 50:  # Only high-intensity fires
-                                features.append({
-                                    "type": "Feature",
-                                    "geometry": {
-                                        "type": "Polygon",
-                                        "coordinates": [[
-                                            [lon-0.05, lat-0.05],
-                                            [lon+0.05, lat-0.05],
-                                            [lon+0.05, lat+0.05],
-                                            [lon-0.05, lat+0.05],
-                                            [lon-0.05, lat-0.05]
-                                        ]]
-                                    },
-                                    "properties": {
-                                        "IncidentName": f"Active Fire (FRP: {frp} MW)",
-                                        "GISAcres": frp * 10,
-                                        "PercentContained": 0,
-                                        "ModifiedOnDateTime_dt": row.get("acq_date", "")
-                                    }
-                                })
-                        except Exception:
-                            continue
-                if features:
-                    print(f"  Fire perimeters (FIRMS high-intensity): {len(features)} fires")
-                    return {"type": "FeatureCollection", "features": features}
-                continue
-
             data = r.json()
-            if "message" in data and "permission" in str(data.get("message","")).lower():
-                print(f"  Fire perimeters: permission denied")
+            if "error" in data:
+                print(f"  Fire perimeters ArcGIS error: {data['error']}")
                 continue
             features = data.get("features", [])
             if features:
                 print(f"  Fire perimeters: {len(features)} active fires")
                 return data
         except Exception as e:
-            print(f"  Fire perimeters failed: {e}")
+            print(f"  Fire perimeters failed ({url[:60]}...): {e}")
             continue
-    
     print("  Fire perimeters: no data available")
     return {"type": "FeatureCollection", "features": []}
 
@@ -1069,15 +1015,16 @@ def mapbox_map():
 
         /* ── HEADER ── */
         #header {{
-            position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
+            position: absolute; top: 14px; left: 50%; transform: translateX(-50%);
             z-index: 10;
             background: linear-gradient(135deg, rgba(0,8,20,0.95) 0%, rgba(0,20,40,0.95) 100%);
             border: 1px solid rgba(0,180,255,0.3);
             border-radius: 12px;
-            padding: 12px 28px;
+            padding: 10px 24px;
             text-align: center;
             backdrop-filter: blur(20px);
             box-shadow: 0 0 30px rgba(0,180,255,0.15), inset 0 1px 0 rgba(255,255,255,0.05);
+            white-space: nowrap;
         }}
         #header::before {{
             content: '';
@@ -1109,24 +1056,25 @@ def mapbox_map():
 
         /* ── STAT CARDS ── */
         #stats {{
-            position: absolute; top: 20px; left: 16px; z-index: 10;
-            display: flex; flex-direction: column; gap: 8px;
+            position: absolute; top: 96px; left: 16px; z-index: 10;
+            display: grid; grid-template-columns: 1fr 1fr; gap: 6px;
+            width: 220px;
         }}
         .stat-card {{
             background: linear-gradient(135deg, rgba(0,8,20,0.92) 0%, rgba(0,15,35,0.92) 100%);
-            border-radius: 10px; padding: 10px 16px;
+            border-radius: 8px; padding: 8px 10px;
             border: 1px solid rgba(255,255,255,0.07);
-            backdrop-filter: blur(20px); min-width: 170px;
+            backdrop-filter: blur(20px);
             position: relative; overflow: hidden;
             transition: border-color 0.3s, box-shadow 0.3s, transform 0.2s;
             cursor: pointer;
         }}
         .stat-card:hover {{
-            border-color: rgba(0,180,255,0.4);
-            box-shadow: 0 0 20px rgba(0,180,255,0.1);
-            transform: translateX(3px);
+            border-color: rgba(0,180,255,0.35);
+            box-shadow: 0 0 16px rgba(0,180,255,0.1);
+            transform: translateY(-1px);
         }}
-        .stat-card:active {{ transform: translateX(1px); }}
+        .stat-card:active {{ transform: translateY(0); }}
         .stat-card::before {{
             content: ''; position: absolute;
             top: 0; left: 0; right: 0; height: 1px;
@@ -1139,35 +1087,54 @@ def mapbox_map():
             border-radius: 2px 0 0 2px;
         }}
         .stat-value {{
-            font-size: 26px; font-weight: 700; line-height: 1;
+            font-size: 20px; font-weight: 700; line-height: 1;
             font-variant-numeric: tabular-nums;
         }}
-        .stat-label {{ font-size: 9px; color: rgba(255,255,255,0.4); margin-top: 3px; letter-spacing: 1.5px; text-transform: uppercase; }}
-        .stat-icon {{ position: absolute; right: 12px; top: 50%; transform: translateY(-50%); font-size: 18px; opacity: 0.2; }}
+        .stat-label {{ font-size: 8px; color: rgba(255,255,255,0.4); margin-top: 3px; letter-spacing: 1px; text-transform: uppercase; }}
+        .stat-icon {{ display: none; }}
 
         /* ── LEGEND ── */
+        #legend-wrap {{
+            position: absolute; bottom: 20px; left: 16px; z-index: 10;
+        }}
+        #legend-toggle {{
+            display: flex; align-items: center; gap: 8px;
+            background: linear-gradient(135deg, rgba(0,8,20,0.92), rgba(0,15,35,0.92));
+            border: 1px solid rgba(255,255,255,0.07); border-radius: 8px;
+            padding: 7px 12px; cursor: pointer; font-size: 10px;
+            color: rgba(0,180,255,0.8); letter-spacing: 1.5px; text-transform: uppercase; font-weight: 600;
+            backdrop-filter: blur(20px); user-select: none;
+            transition: border-color 0.2s;
+        }}
+        #legend-toggle:hover {{ border-color: rgba(0,180,255,0.4); }}
+        #legend-toggle-arrow {{ font-size: 8px; transition: transform 0.3s; }}
         #legend {{
-            position: absolute; bottom: 30px; left: 16px; z-index: 10;
-            background: linear-gradient(135deg, rgba(0,8,20,0.92) 0%, rgba(0,15,35,0.92) 100%);
-            border-radius: 10px; padding: 14px 18px;
-            border: 1px solid rgba(255,255,255,0.07);
-            backdrop-filter: blur(20px); font-size: 11px;
-            display: flex; gap: 20px;
-            box-shadow: 0 4px 24px rgba(0,0,0,0.4);
+            background: linear-gradient(135deg, rgba(0,8,20,0.94) 0%, rgba(0,15,35,0.94) 100%);
+            border-radius: 0 8px 8px 8px; padding: 12px 14px;
+            border: 1px solid rgba(255,255,255,0.07); border-top: none;
+            backdrop-filter: blur(20px); font-size: 10.5px;
+            display: grid; grid-template-columns: 1fr 1fr;
+            gap: 0 18px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+            max-height: 400px;
+            overflow: hidden;
+            transition: max-height 0.35s ease, padding 0.35s ease;
         }}
+        #legend.collapsed {{ max-height: 0; padding-top: 0; padding-bottom: 0; border: none; }}
+        .legend-section {{ margin-bottom: 4px; }}
         .legend-title {{
-            font-size: 9px; color: rgba(0,180,255,0.8); font-weight: 600;
-            letter-spacing: 2px; text-transform: uppercase; margin-bottom: 8px;
-            border-bottom: 1px solid rgba(0,180,255,0.2); padding-bottom: 4px;
+            font-size: 8px; color: rgba(0,180,255,0.75); font-weight: 600;
+            letter-spacing: 1.5px; text-transform: uppercase; margin: 8px 0 5px 0;
         }}
-        .legend-item {{ display: flex; align-items: center; gap: 8px; margin: 4px 0; color: rgba(255,255,255,0.7); }}
+        .legend-title:first-child {{ margin-top: 0; }}
+        .legend-item {{ display: flex; align-items: center; gap: 7px; margin: 3px 0; color: rgba(255,255,255,0.65); }}
         .legend-dot {{
-            width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
-            box-shadow: 0 0 6px currentColor;
+            width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+            box-shadow: 0 0 5px currentColor;
         }}
         .legend-box {{
-            width: 14px; height: 10px; border-radius: 2px; flex-shrink: 0;
-            box-shadow: 0 0 6px currentColor;
+            width: 12px; height: 8px; border-radius: 2px; flex-shrink: 0;
+            box-shadow: 0 0 5px currentColor;
         }}
 
         /* ── POPUP ── */
@@ -1220,18 +1187,18 @@ def mapbox_map():
 
         /* ── ADDRESS SEARCH ── */
         #address-panel {{
-            position: absolute; bottom: 30px; right: 16px; z-index: 10;
+            position: absolute; bottom: 20px; right: 16px; z-index: 10;
             background: linear-gradient(135deg, rgba(0,8,20,0.96) 0%, rgba(0,20,40,0.96) 100%);
-            border: 1px solid rgba(0,180,255,0.3); border-radius: 12px;
-            padding: 16px; width: 300px;
+            border: 1px solid rgba(0,180,255,0.25); border-radius: 10px;
+            padding: 12px 14px; width: 270px;
             backdrop-filter: blur(20px);
-            box-shadow: 0 0 30px rgba(0,0,0,0.5);
+            box-shadow: 0 4px 24px rgba(0,0,0,0.5);
         }}
         #address-panel h4 {{
-            font-size: 10px; color: rgba(0,180,255,0.8); font-weight: 600;
+            font-size: 9px; color: rgba(0,180,255,0.75); font-weight: 600;
             letter-spacing: 2px; text-transform: uppercase;
-            margin-bottom: 10px; border-bottom: 1px solid rgba(0,180,255,0.2);
-            padding-bottom: 6px;
+            margin-bottom: 8px; border-bottom: 1px solid rgba(0,180,255,0.15);
+            padding-bottom: 5px;
         }}
         #address-input {{
             width: 100%; padding: 8px 10px; border-radius: 6px;
@@ -1345,19 +1312,17 @@ def mapbox_map():
 
         /* ── MOBILE RESPONSIVE ── */
         @media (max-width: 768px) {{
-            #stats {{ top: auto; left: 0; right: 0; bottom: 0; flex-direction: row;
-                flex-wrap: wrap; gap: 5px; padding: 8px;
+            #stats {{ top: auto; left: 0; right: 0; bottom: 0; grid-template-columns: repeat(3, 1fr);
+                gap: 4px; padding: 8px;
                 background: linear-gradient(0deg, rgba(0,5,15,0.97), transparent);
-                justify-content: center; }}
-            .stat-card {{ min-width: 120px; flex: 1; padding: 8px 10px; }}
-            .stat-value {{ font-size: 20px; }}
-            .stat-icon {{ display: none; }}
-            #header {{ top: 10px; padding: 8px 16px; }}
-            #header h1 {{ font-size: 13px; letter-spacing: 1px; }}
-            #address-panel {{ width: calc(100vw - 32px); bottom: auto; top: 80px; right: 16px; }}
-            #legend {{ display: none; }}
+                width: 100%; }}
+            .stat-card {{ padding: 6px 8px; }}
+            .stat-value {{ font-size: 16px; }}
+            #header {{ top: 10px; padding: 8px 14px; }}
+            #header h1 {{ font-size: 12px; letter-spacing: 1px; }}
+            #address-panel {{ width: calc(100vw - 32px); bottom: auto; top: 76px; right: 16px; display: none; }}
+            #legend-wrap {{ display: none; }}
             .corner {{ display: none; }}
-            #stats > div:nth-child(n+5) {{ display: none; }}
         }}
     </style>
 </head>
@@ -1411,44 +1376,38 @@ def mapbox_map():
     </div>
 </div>
 
-<!-- Legend -->
-<div id="legend">
-    <div class="legend-section">
-        <div class="legend-title">⚡ NWS Warnings</div>
-        <div class="legend-item"><div class="legend-box" style="background:#FF0000;color:#FF0000"></div>Tornado</div>
-        <div class="legend-item"><div class="legend-box" style="background:#FF6600;color:#FF6600"></div>Hurricane</div>
-        <div class="legend-item"><div class="legend-box" style="background:#FF6666;color:#FF6666"></div>Severe T-Storm</div>
-        <div class="legend-item"><div class="legend-box" style="background:#00BFFF;color:#00BFFF"></div>Flash Flood</div>
-        <div class="legend-item"><div class="legend-box" style="background:#FFFF00;color:#FFFF00"></div>Other</div>
+<!-- Legend (collapsible) -->
+<div id="legend-wrap">
+    <div id="legend-toggle" onclick="toggleLegend()">
+        <span>MAP LEGEND</span>
+        <span id="legend-toggle-arrow">▲</span>
     </div>
-    <div class="legend-section">
-        <div class="legend-title">⛈ SPC Outlook</div>
-        <div class="legend-item"><div class="legend-box" style="background:#76FF7A;color:#76FF7A"></div>General Thunder</div>
-        <div class="legend-item"><div class="legend-box" style="background:#FFFF00;color:#FFFF00"></div>Slight Risk</div>
-        <div class="legend-item"><div class="legend-box" style="background:#FF9900;color:#FF9900"></div>Enhanced Risk</div>
-        <div class="legend-item"><div class="legend-box" style="background:#FF0000;color:#FF0000"></div>Moderate Risk</div>
-    </div>
-    <div class="legend-section">
-        <div class="legend-title">🔴 Earthquakes</div>
-        <div class="legend-item"><div class="legend-dot" style="background:#FFFF00;color:#FFFF00"></div>M2.5 – 3.9</div>
-        <div class="legend-item"><div class="legend-dot" style="background:#FF9900;color:#FF9900"></div>M4.0 – 4.9</div>
-        <div class="legend-item"><div class="legend-dot" style="background:#FF0000;color:#FF0000"></div>M5.0+</div>
-        <div class="legend-title" style="margin-top:10px">🔥 Wildfires</div>
-        <div class="legend-item"><div class="legend-dot" style="background:#FF4500;color:#FF4500"></div>NASA FIRMS</div>
-        <div class="legend-item"><div class="legend-box" style="background:rgba(255,69,0,0.5);color:#FF4500"></div>Fire Perimeter</div>
-        <div class="legend-title" style="margin-top:10px">⚡ Storm Reports</div>
-        <div class="legend-item"><div class="legend-dot" style="background:#FFFF00;color:#FFFF00"></div>NWS LSR (last 6hr)</div>
-    </div>
-    <div class="legend-section">
-        <div class="legend-title">🏗 Infrastructure</div>
-        <div class="legend-item"><div class="legend-dot" style="background:#FF0066;color:#FF0066"></div>Hospital</div>
-        <div class="legend-item"><div class="legend-dot" style="background:#FF4400;color:#FF4400"></div>Fire Station</div>
-        <div class="legend-item"><div class="legend-dot" style="background:#FFD700;color:#FFD700"></div>Power Plant</div>
-        <div class="legend-item"><div class="legend-dot" style="background:#00FF88;color:#00FF88"></div>School</div>
-        <div class="legend-item"><div class="legend-dot" style="background:#FF0000;color:#FF0000"></div>⚠ At Risk</div>
-        <div class="legend-title" style="margin-top:10px">📍 Counties</div>
-        <div class="legend-item"><div class="legend-box" style="background:rgba(255,100,0,0.4);color:#FF6400"></div>Low Pop</div>
-        <div class="legend-item"><div class="legend-box" style="background:rgba(255,0,0,0.6);color:#FF0000"></div>High Pop</div>
+    <div id="legend">
+        <div>
+            <div class="legend-title">NWS Warnings</div>
+            <div class="legend-item"><div class="legend-box" style="background:#FF0000;color:#FF0000"></div>Tornado</div>
+            <div class="legend-item"><div class="legend-box" style="background:#FF6600;color:#FF6600"></div>Hurricane</div>
+            <div class="legend-item"><div class="legend-box" style="background:#FF6666;color:#FF6666"></div>Svr T-Storm</div>
+            <div class="legend-item"><div class="legend-box" style="background:#00BFFF;color:#00BFFF"></div>Flash Flood</div>
+            <div class="legend-title">SPC Outlook</div>
+            <div class="legend-item"><div class="legend-box" style="background:#76FF7A;color:#76FF7A"></div>Thunder</div>
+            <div class="legend-item"><div class="legend-box" style="background:#FFFF00;color:#FFFF00"></div>Slight Risk</div>
+            <div class="legend-item"><div class="legend-box" style="background:#FF9900;color:#FF9900"></div>Enhanced</div>
+            <div class="legend-item"><div class="legend-box" style="background:#FF0000;color:#FF0000"></div>Moderate</div>
+        </div>
+        <div>
+            <div class="legend-title">Earthquakes</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#FFFF00;color:#FFFF00"></div>M2.5–3.9</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#FF9900;color:#FF9900"></div>M4.0–4.9</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#FF0000;color:#FF0000"></div>M5.0+</div>
+            <div class="legend-title">Wildfires</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#FF4500;color:#FF4500"></div>FIRMS Point</div>
+            <div class="legend-item"><div class="legend-box" style="background:rgba(255,69,0,0.5);color:#FF4500"></div>Perimeter</div>
+            <div class="legend-title">Infrastructure</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#FF0066;color:#FF0066"></div>Hospital</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#FFD700;color:#FFD700"></div>Power Plant</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#FF0000;color:#FF0000"></div>⚠ At Risk</div>
+        </div>
     </div>
 </div>
 
@@ -1503,6 +1462,16 @@ const map = new mapboxgl.Map({{
 
 map.addControl(new mapboxgl.NavigationControl(), 'top-right');
 map.addControl(new mapboxgl.FullscreenControl(), 'top-right');
+
+// ── LEGEND TOGGLE ────────────────────────────────
+let _legendOpen = true;
+function toggleLegend() {{
+    _legendOpen = !_legendOpen;
+    const legend = document.getElementById('legend');
+    const arrow  = document.getElementById('legend-toggle-arrow');
+    legend.classList.toggle('collapsed', !_legendOpen);
+    arrow.style.transform = _legendOpen ? '' : 'rotate(180deg)';
+}}
 
 function showPopup(title, rows, e) {{
     const popup = document.getElementById('popup');
