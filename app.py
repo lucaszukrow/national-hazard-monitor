@@ -26,6 +26,14 @@ import dash
 from dash import dcc, html, Input, Output
 import plotly.graph_objects as go
 
+# SendGrid — optional; alerting is silently skipped if not installed or not configured
+try:
+    from sendgrid import SendGridAPIClient
+    from sendgrid.helpers.mail import Mail
+    _SENDGRID_AVAILABLE = True
+except ImportError:
+    _SENDGRID_AVAILABLE = False
+
 # ─────────────────────────────────────────────
 # DATA SOURCE URLs
 # ─────────────────────────────────────────────
@@ -33,8 +41,10 @@ NWS_URL      = "https://mapservices.weather.noaa.gov/eventdriven/rest/services/W
 SPC_URL      = "https://www.spc.noaa.gov/products/outlook/day1otlk_cat.nolyr.geojson"
 USGS_EQ_URL  = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_day.geojson"
 NHC_URL      = "https://www.nhc.noaa.gov/CurrentStorms.json"
-FIRMS_KEY    = os.environ.get("FIRMS_KEY", "")
-FIRMS_URL    = f"https://firms.modaps.eosdis.nasa.gov/api/area/csv/{FIRMS_KEY}/VIIRS_SNPP_NRT/-125,24,-66,50/2"
+FIRMS_KEY        = os.environ.get("FIRMS_KEY", "")
+FIRMS_URL        = f"https://firms.modaps.eosdis.nasa.gov/api/area/csv/{FIRMS_KEY}/VIIRS_SNPP_NRT/-125,24,-66,50/2"
+SENDGRID_API_KEY = os.environ.get("SENDGRID_API_KEY", "")
+ALERT_EMAIL      = os.environ.get("ALERT_EMAIL", "")
 CENSUS_URL   = "https://www2.census.gov/programs-surveys/popest/datasets/2020-2023/counties/totals/co-est2023-alldata.csv"
 COUNTIES_URL = "https://raw.githubusercontent.com/plotly/datasets/master/geojson-counties-fips.json"
 
@@ -129,7 +139,10 @@ state = {
     "map_html": "",
     "updating": False,
     "lightning": {"type": "FeatureCollection", "features": []},
-    "fire_perimeters": {"type": "FeatureCollection", "features": []}
+    "fire_perimeters": {"type": "FeatureCollection", "features": []},
+    # In-memory only — intentionally not cached so restarts don't suppress alerts
+    # for events that are still active when the server comes back up
+    "seen_alert_ids": set()
 }
 
 # Load cache at module level — runs when gunicorn imports app
@@ -578,6 +591,164 @@ def build_folium_map(warnings, spc, earthquakes, storms, fires):
     return m._repr_html_()
 
 # ─────────────────────────────────────────────
+# EMAIL ALERTING (SendGrid)
+# Fires on new tornado warnings, hurricane warnings, and M5.0+ earthquakes
+# ─────────────────────────────────────────────
+
+def send_alert_email(subject, body):
+    """Send a plain-text alert email via SendGrid. Silently skips if unconfigured."""
+    if not _SENDGRID_AVAILABLE or not SENDGRID_API_KEY or not ALERT_EMAIL:
+        return
+    try:
+        message = Mail(
+            from_email="alerts@nationalhazardmonitor.app",
+            to_emails=ALERT_EMAIL,
+            subject=subject,
+            plain_text_content=body
+        )
+        sg = SendGridAPIClient(SENDGRID_API_KEY)
+        sg.send(message)
+        print(f"  [ALERT] Email sent: {subject}")
+    except Exception as e:
+        print(f"  [ALERT] Email send failed: {e}")
+
+
+def check_and_send_alerts(warnings, earthquakes, storms, affected):
+    """
+    Compare incoming data against seen_alert_ids and send emails for:
+      - New Tornado Warnings  (NWS phenom=TO, sig=W)
+      - New Hurricane Warnings (NWS phenom=HU, sig=W)
+      - New M5.0+ Earthquakes (USGS)
+      - Newly detected NHC tropical storms / hurricanes
+    """
+    if not _SENDGRID_AVAILABLE or not SENDGRID_API_KEY or not ALERT_EMAIL:
+        return
+
+    now_str = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+
+    # Build a lookup: phenom code → affected counties for this cycle
+    counties_by_phenom = {}
+    for c in affected:
+        p = str(c.get("phenom", "")).strip().upper()
+        counties_by_phenom.setdefault(p, []).append(c)
+
+    # ── NWS Tornado and Hurricane Warnings ──
+    for feat in warnings.get("features", []):
+        props  = feat.get("properties", {})
+        phenom = str(props.get("phenom", "")).strip().upper()
+        sig    = str(props.get("sig", "")).strip()
+
+        if phenom not in ("TO", "HU") or sig != "W":
+            continue
+
+        # Build a stable event ID. NWS MapServer features carry a numeric ObjectID
+        # as the GeoJSON feature "id"; fall back to a composite key if absent.
+        feat_id = feat.get("id") or feat.get("properties", {}).get("objectid") or ""
+        wfo = props.get("wfo", "")
+        event_id = f"nws_{phenom}_{sig}_{feat_id or wfo}"
+
+        if event_id in state["seen_alert_ids"]:
+            continue
+        state["seen_alert_ids"].add(event_id)
+
+        event_name = phenom_names.get(phenom, phenom) + " Warning"
+        counties   = counties_by_phenom.get(phenom, [])
+        top_counties = counties[:15]
+        county_lines = "\n".join(
+            f"  - {c['county']}, {c['state']}  (pop: {c['population']:,})"
+            for c in top_counties
+        )
+        if len(counties) > 15:
+            county_lines += f"\n  ... and {len(counties) - 15} more"
+        total_pop = sum(c.get("population", 0) for c in counties)
+
+        location_hint = wfo if wfo else "Unknown WFO"
+        subject = f"HAZARD ALERT: {event_name} - {location_hint}"
+        body = (
+            f"NATIONAL HAZARD MONITOR ALERT\n"
+            f"{'=' * 42}\n\n"
+            f"EVENT:            {event_name}\n"
+            f"ISSUING OFFICE:   {wfo or 'N/A'}\n"
+            f"TIME:             {now_str}\n\n"
+            f"AFFECTED COUNTIES ({len(counties)} total):\n"
+            f"{county_lines or '  (none matched)'}\n\n"
+            f"POPULATION AT RISK: {total_pop:,}\n\n"
+            f"--\n"
+            f"National Hazard Monitor\n"
+        )
+        send_alert_email(subject, body)
+
+    # ── USGS Earthquakes M5.0+ ──
+    for feat in earthquakes.get("features", []):
+        props = feat.get("properties", {})
+        mag   = props.get("mag") or 0
+        if mag < 5.0:
+            continue
+
+        # USGS assigns stable IDs like "us7000k9g1"
+        feat_id  = feat.get("id") or ""
+        place    = props.get("place", "Unknown location")
+        event_id = f"eq_{feat_id}" if feat_id else f"eq_{place}_{mag}"
+
+        if event_id in state["seen_alert_ids"]:
+            continue
+        state["seen_alert_ids"].add(event_id)
+
+        depth = props.get("depth", "?")
+        eq_ts = props.get("time", 0)
+        if eq_ts:
+            eq_time_str = datetime.datetime.utcfromtimestamp(eq_ts / 1000).strftime("%Y-%m-%d %H:%M:%S UTC")
+        else:
+            eq_time_str = now_str
+
+        subject = f"HAZARD ALERT: M{mag:.1f} Earthquake - {place}"
+        body = (
+            f"NATIONAL HAZARD MONITOR ALERT\n"
+            f"{'=' * 42}\n\n"
+            f"EVENT:     Magnitude {mag:.1f} Earthquake\n"
+            f"LOCATION:  {place}\n"
+            f"DEPTH:     {depth} km\n"
+            f"TIME:      {eq_time_str}\n"
+            f"USGS ID:   {feat_id or 'N/A'}\n"
+            f"USGS URL:  https://earthquake.usgs.gov/earthquakes/eventpage/{feat_id}\n\n"
+            f"--\n"
+            f"National Hazard Monitor\n"
+        )
+        send_alert_email(subject, body)
+
+    # ── NHC Active Tropical Storms / Hurricanes ──
+    for storm in storms:
+        info   = storm.get("info", {})
+        wallet = info.get("wallet", "") or ""
+        name   = storm.get("name", "Unknown Storm")
+
+        if not wallet:
+            continue
+
+        event_id = f"nhc_{wallet}"
+        if event_id in state["seen_alert_ids"]:
+            continue
+        state["seen_alert_ids"].add(event_id)
+
+        classification = info.get("classification", "Tropical Cyclone")
+        intensity      = info.get("intensity", "?")
+        subject = f"HAZARD ALERT: {classification} {name} - Now Active"
+        body = (
+            f"NATIONAL HAZARD MONITOR ALERT\n"
+            f"{'=' * 42}\n\n"
+            f"EVENT:          {classification} {name}\n"
+            f"MAX WINDS:      {intensity} kt\n"
+            f"NHC STORM ID:   {wallet}\n"
+            f"DETECTED:       {now_str}\n\n"
+            f"This storm is being actively tracked by the National Hurricane Center.\n"
+            f"NHC Advisory:   https://www.nhc.noaa.gov/\n\n"
+            f"--\n"
+            f"National Hazard Monitor\n"
+        )
+        send_alert_email(subject, body)
+
+
+# ─────────────────────────────────────────────
 # BACKGROUND UPDATE THREAD
 # Runs every 30 minutes automatically
 # ─────────────────────────────────────────────
@@ -622,6 +793,9 @@ def run_update():
         # Build Folium map
         print("Building interactive map...")
         map_html = build_folium_map(warnings, spc, earthquakes, storms, fires)
+
+        # Send alerts for new high-priority events
+        check_and_send_alerts(warnings, earthquakes, storms, affected)
 
         # Update global state
         state.update({
