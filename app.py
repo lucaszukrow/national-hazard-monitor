@@ -790,15 +790,17 @@ server = app.server  # Expose Flask server for Render
 # Use Flask's before_first_request to start background thread
 # This runs once when the first request hits the server
 _started = False
+_started_lock = threading.Lock()
 
 @server.before_request
 def start_background_on_first_request():
     global _started
-    if not _started:
-        _started = True
-        print("First request — starting background update thread...")
-        t = threading.Thread(target=lambda: schedule_updates(30), daemon=True)
-        t.start()
+    with _started_lock:
+        if not _started:
+            _started = True
+            print("First request — starting background update thread...")
+            t = threading.Thread(target=lambda: schedule_updates(30), daemon=True)
+            t.start()
 
 # ─────────────────────────────────────────────
 # FLASK API ENDPOINTS
@@ -982,6 +984,35 @@ def api_infrastructure():
     )
 
 
+@app.server.route("/api/storms")
+def api_storms():
+    """Returns hurricane cones and track points as GeoJSON."""
+    features = []
+    for storm in state.get("storms", []):
+        name = storm.get("name", "Storm")
+        cone = storm.get("cone")
+        if cone and cone.get("features"):
+            for feat in cone["features"]:
+                f = dict(feat)
+                f["properties"] = {**(feat.get("properties") or {}), "storm_name": name, "layer": "cone"}
+                features.append(f)
+        track = storm.get("track")
+        if track and track.get("features"):
+            for i, feat in enumerate(track["features"]):
+                coords = feat.get("geometry", {}).get("coordinates", [])
+                if len(coords) >= 2:
+                    features.append({
+                        "type": "Feature",
+                        "geometry": {"type": "Point", "coordinates": coords},
+                        "properties": {**(feat.get("properties") or {}),
+                                       "storm_name": name, "layer": "track", "seq": i}
+                    })
+    return flask_module.Response(
+        json.dumps({"type": "FeatureCollection", "features": features}),
+        mimetype="application/json",
+        headers={"Access-Control-Allow-Origin": "*"}
+    )
+
 @app.server.route("/api/lightning")
 def api_lightning():
     """Returns recent lightning strikes as GeoJSON."""
@@ -1063,14 +1094,17 @@ def mapbox_map():
 
         /* ── LIVE INDICATOR ── */
         #live-dot {{
-            display: inline-block; width: 8px; height: 8px; background: #00FF88;
+            --dot-color: #00FF88;
+            display: inline-block; width: 8px; height: 8px;
+            background: var(--dot-color);
             border-radius: 50%; margin-right: 6px;
-            box-shadow: 0 0 8px #00FF88;
+            box-shadow: 0 0 8px var(--dot-color);
             animation: pulse-dot 1.5s ease-in-out infinite;
+            transition: background 0.8s ease, box-shadow 0.8s ease;
         }}
         @keyframes pulse-dot {{
-            0%, 100% {{ opacity: 1; box-shadow: 0 0 8px #00FF88; }}
-            50% {{ opacity: 0.4; box-shadow: 0 0 2px #00FF88; }}
+            0%, 100% {{ opacity: 1; }}
+            50% {{ opacity: 0.35; }}
         }}
 
         /* ── STAT CARDS ── */
@@ -1084,12 +1118,15 @@ def mapbox_map():
             border: 1px solid rgba(255,255,255,0.07);
             backdrop-filter: blur(20px); min-width: 170px;
             position: relative; overflow: hidden;
-            transition: border-color 0.3s, box-shadow 0.3s;
+            transition: border-color 0.3s, box-shadow 0.3s, transform 0.2s;
+            cursor: pointer;
         }}
         .stat-card:hover {{
             border-color: rgba(0,180,255,0.4);
             box-shadow: 0 0 20px rgba(0,180,255,0.1);
+            transform: translateX(3px);
         }}
+        .stat-card:active {{ transform: translateX(1px); }}
         .stat-card::before {{
             content: ''; position: absolute;
             top: 0; left: 0; right: 0; height: 1px;
@@ -1294,6 +1331,34 @@ def mapbox_map():
         ::-webkit-scrollbar {{ width: 4px; }}
         ::-webkit-scrollbar-track {{ background: rgba(0,0,0,0.2); }}
         ::-webkit-scrollbar-thumb {{ background: rgba(0,180,255,0.3); border-radius: 2px; }}
+
+        /* ── HOVER TOOLTIP ── */
+        #hover-tooltip {{
+            position: absolute; z-index: 15; pointer-events: none;
+            background: linear-gradient(135deg, rgba(0,8,20,0.96), rgba(0,20,40,0.96));
+            border: 1px solid rgba(0,180,255,0.3); border-radius: 7px;
+            padding: 7px 12px; font-size: 11px;
+            backdrop-filter: blur(16px); display: none;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.6);
+            white-space: nowrap; line-height: 1.6;
+        }}
+
+        /* ── MOBILE RESPONSIVE ── */
+        @media (max-width: 768px) {{
+            #stats {{ top: auto; left: 0; right: 0; bottom: 0; flex-direction: row;
+                flex-wrap: wrap; gap: 5px; padding: 8px;
+                background: linear-gradient(0deg, rgba(0,5,15,0.97), transparent);
+                justify-content: center; }}
+            .stat-card {{ min-width: 120px; flex: 1; padding: 8px 10px; }}
+            .stat-value {{ font-size: 20px; }}
+            .stat-icon {{ display: none; }}
+            #header {{ top: 10px; padding: 8px 16px; }}
+            #header h1 {{ font-size: 13px; letter-spacing: 1px; }}
+            #address-panel {{ width: calc(100vw - 32px); bottom: auto; top: 80px; right: 16px; }}
+            #legend {{ display: none; }}
+            .corner {{ display: none; }}
+            #stats > div:nth-child(n+5) {{ display: none; }}
+        }}
     </style>
 </head>
 <body>
@@ -1458,6 +1523,21 @@ function setupLayers() {{
     // Guard: don't add sources if already added
     if (map.getSource('warnings')) return;
 
+    // ── 3D TERRAIN + ATMOSPHERE ─────────────────────
+    map.addSource('mapbox-dem', {{
+        type: 'raster-dem',
+        url: 'mapbox://mapbox.mapbox-terrain-dem-v1',
+        tileSize: 512, maxzoom: 14
+    }});
+    map.setTerrain({{ source: 'mapbox-dem', exaggeration: 1.8 }});
+    map.setFog({{
+        color: 'rgba(0,4,12,0.95)',
+        'high-color': '#000a1a',
+        'horizon-blend': 0.12,
+        'space-color': '#000000',
+        'star-intensity': 0.15
+    }});
+
     // ── SPC OUTLOOK ─────────────────────────────────
     map.addSource('spc', {{ type: 'geojson', data: '/api/spc' }});
     map.addLayer({{
@@ -1537,6 +1617,26 @@ function setupLayers() {{
             'circle-opacity': 0.8,
             'circle-stroke-color': '#FFFFFF',
             'circle-stroke-width': 1.5
+        }}
+    }});
+
+    // ── WILDFIRE HEATMAP (low zoom) ──────────────────
+    map.addSource('fires-heat', {{ type: 'geojson', data: '/api/fires' }});
+    map.addLayer({{
+        id: 'fire-heat', type: 'heatmap', source: 'fires-heat',
+        maxzoom: 8,
+        paint: {{
+            'heatmap-weight': ['interpolate', ['linear'], ['get', 'frp'], 0, 0, 200, 1],
+            'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 0, 1, 8, 4],
+            'heatmap-color': ['interpolate', ['linear'], ['heatmap-density'],
+                0,   'rgba(0,0,0,0)',
+                0.15,'rgba(255,140,0,0.3)',
+                0.4, 'rgba(255,69,0,0.65)',
+                0.7, 'rgba(255,0,0,0.85)',
+                1,   '#FF1400'
+            ],
+            'heatmap-radius': ['interpolate', ['linear'], ['zoom'], 0, 20, 8, 40],
+            'heatmap-opacity': ['interpolate', ['linear'], ['zoom'], 5, 1, 8, 0]
         }}
     }});
 
@@ -1762,26 +1862,188 @@ function setupLayers() {{
         layout: {{ 'visibility': 'none' }}
     }});
 
+    // ── LIGHTNING / STORM REPORTS ────────────────────
+    map.addSource('lightning', {{ type: 'geojson', data: '/api/lightning' }});
+    map.addLayer({{
+        id: 'lightning-strikes', type: 'circle', source: 'lightning',
+        paint: {{
+            'circle-color': '#FFFF00',
+            'circle-radius': 5,
+            'circle-stroke-color': 'rgba(255,255,255,0.6)',
+            'circle-stroke-width': 1,
+            'circle-opacity': 0.85
+        }}
+    }});
+    map.on('click', 'lightning-strikes', (e) => {{
+        const p = e.features[0].properties;
+        showPopup('⚡ Storm Report', {{
+            'Type':     p.typetext || 'N/A',
+            'Location': p.city    || 'N/A',
+            'Time':     p.valid   ? new Date(p.valid).toLocaleString() : 'N/A',
+            'Source':   'NWS LSR'
+        }}, e);
+    }});
+    map.on('mouseenter', 'lightning-strikes', () => map.getCanvas().style.cursor = 'pointer');
+    map.on('mouseleave', 'lightning-strikes', () => map.getCanvas().style.cursor = '');
+
+    // ── FIRE PERIMETERS ──────────────────────────────
+    map.addSource('fire_perimeters', {{ type: 'geojson', data: '/api/fire_perimeters' }});
+    map.addLayer({{
+        id: 'fire-perimeter-fill', type: 'fill', source: 'fire_perimeters',
+        paint: {{
+            'fill-color': 'rgba(255,69,0,0.25)',
+            'fill-outline-color': '#FF4500'
+        }}
+    }});
+    map.addLayer({{
+        id: 'fire-perimeter-outline', type: 'line', source: 'fire_perimeters',
+        paint: {{
+            'line-color': '#FF4500',
+            'line-width': 2,
+            'line-opacity': 0.9,
+            'line-dasharray': [2, 1]
+        }}
+    }});
+    map.on('click', 'fire-perimeter-fill', (e) => {{
+        const p = e.features[0].properties;
+        showPopup('🔥 ' + (p.IncidentName || 'Active Fire'), {{
+            'Acres':     p.GISAcres ? Math.round(p.GISAcres).toLocaleString() : 'N/A',
+            'Contained': (p.PercentContained || 0) + '%',
+            'Updated':   p.ModifiedOnDateTime_dt || 'N/A'
+        }}, e);
+    }});
+    map.on('mouseenter', 'fire-perimeter-fill', () => map.getCanvas().style.cursor = 'pointer');
+    map.on('mouseleave', 'fire-perimeter-fill', () => map.getCanvas().style.cursor = '');
+
+    // ── HURRICANES ───────────────────────────────────
+    map.addSource('storms', {{ type: 'geojson', data: '/api/storms' }});
+    map.addLayer({{
+        id: 'storm-cone', type: 'fill', source: 'storms',
+        filter: ['==', ['get', 'layer'], 'cone'],
+        paint: {{
+            'fill-color': '#FF6600',
+            'fill-opacity': 0.18
+        }}
+    }});
+    map.addLayer({{
+        id: 'storm-cone-outline', type: 'line', source: 'storms',
+        filter: ['==', ['get', 'layer'], 'cone'],
+        paint: {{ 'line-color': '#FF6600', 'line-width': 2, 'line-opacity': 0.7 }}
+    }});
+    map.addLayer({{
+        id: 'storm-track', type: 'circle', source: 'storms',
+        filter: ['==', ['get', 'layer'], 'track'],
+        paint: {{
+            'circle-color': '#FF6600',
+            'circle-radius': 7,
+            'circle-stroke-color': '#FFD700',
+            'circle-stroke-width': 2,
+            'circle-opacity': 0.9
+        }}
+    }});
+    map.on('click', 'storm-track', (e) => {{
+        const p = e.features[0].properties;
+        showPopup('🌀 ' + (p.storm_name || 'Hurricane'), {{
+            'Type': 'Forecast Track Point',
+            'Storm': p.storm_name || 'N/A'
+        }}, e);
+    }});
+    map.on('mouseenter', 'storm-track', () => map.getCanvas().style.cursor = 'pointer');
+    map.on('mouseleave', 'storm-track', () => map.getCanvas().style.cursor = '');
+
+    // Animate hurricane track — pulse radius on each point sequentially
+    let _stormFrame = 0;
+    setInterval(() => {{
+        if (!map.getLayer('storm-track')) return;
+        const pulse = 7 + Math.sin(_stormFrame * 0.15) * 3;
+        map.setPaintProperty('storm-track', 'circle-radius', pulse);
+        _stormFrame++;
+    }}, 80);
+
+    // ── COUNTY HOVER TOOLTIP ─────────────────────────
+    const hoverTooltip = document.createElement('div');
+    hoverTooltip.id = 'hover-tooltip';
+    document.body.appendChild(hoverTooltip);
+
+    map.on('mousemove', 'counties-fill', (e) => {{
+        const p = e.features[0].properties;
+        const pop = Number(p.population).toLocaleString();
+        hoverTooltip.innerHTML = `
+            <span style="color:#FF9600;font-weight:700;">${{p.county}}, ${{p.state}}</span><br>
+            <span style="color:rgba(255,255,255,0.5);">Pop: </span>
+            <span style="color:white;">${{pop}}</span>
+            <span style="color:rgba(255,255,255,0.25);"> · </span>
+            <span style="color:#FF8888;">${{p.event || ''}}</span>
+        `;
+        hoverTooltip.style.display = 'block';
+        hoverTooltip.style.left = Math.min(e.point.x + 14, window.innerWidth - 280) + 'px';
+        hoverTooltip.style.top  = Math.max(e.point.y - 52, 10) + 'px';
+    }});
+    map.on('mouseleave', 'counties-fill', () => {{ hoverTooltip.style.display = 'none'; }});
+
+    // ── NEXRAD AUTO-REFRESH (every 60s for latest radar) ─
+    setInterval(() => {{
+        if (map.getSource('nexrad')) {{
+            const t = Date.now();
+            map.getSource('nexrad').tiles = [
+                `https://mesonet.agron.iastate.edu/cgi-bin/wms/nexrad/n0r.cgi?SERVICE=WMS&REQUEST=GetMap&VERSION=1.1.1&LAYERS=nexrad-n0r&STYLES=&FORMAT=image/png&TRANSPARENT=TRUE&HEIGHT=256&WIDTH=256&SRS=EPSG:3857&BBOX={{bbox-epsg-3857}}&_t=${{t}}`
+            ];
+            map.style.sourceCaches['nexrad'].clearTiles();
+            map.style.sourceCaches['nexrad'].update(map.transform);
+            map.triggerRepaint();
+        }}
+    }}, 60000);
+
     // ── LAYER TOGGLE BUTTONS ─────────────────────────
-    // Add toggle buttons for radar and satellite
     const toggleContainer = document.createElement('div');
-    toggleContainer.style.cssText = 'position:absolute;top:200px;right:16px;z-index:10;display:flex;flex-direction:column;gap:6px;';
+    toggleContainer.style.cssText = `
+        position: absolute; top: 200px; right: 16px; z-index: 10;
+        display: flex; flex-direction: column; gap: 5px;
+        background: linear-gradient(135deg, rgba(0,8,20,0.92) 0%, rgba(0,15,35,0.92) 100%);
+        border: 1px solid rgba(255,255,255,0.07);
+        border-radius: 10px; padding: 10px 12px;
+        backdrop-filter: blur(20px);
+        box-shadow: 0 4px 24px rgba(0,0,0,0.4);
+        min-width: 170px;
+    `;
+    const toggleHeader = document.createElement('div');
+    toggleHeader.textContent = 'LAYERS';
+    toggleHeader.style.cssText = `
+        font-size: 9px; color: rgba(0,180,255,0.8); font-weight: 600;
+        letter-spacing: 2px; text-transform: uppercase;
+        margin-bottom: 6px; padding-bottom: 5px;
+        border-bottom: 1px solid rgba(0,180,255,0.2);
+    `;
+    toggleContainer.appendChild(toggleHeader);
 
     function makeToggle(label, layerId, defaultOn) {{
         const btn = document.createElement('button');
-        btn.textContent = (defaultOn ? '✅ ' : '⬜ ') + label;
-        btn.style.cssText = 'background:rgba(10,10,10,0.9);color:white;border:1px solid #444;border-radius:6px;padding:6px 10px;cursor:pointer;font-size:11px;text-align:left;';
+        const dot = defaultOn ? '🟢' : '⚫';
+        btn.textContent = dot + ' ' + label;
+        btn.style.cssText = `
+            background: transparent;
+            color: rgba(255,255,255,${{defaultOn ? '0.85' : '0.4'}});
+            border: none; border-radius: 5px; padding: 5px 6px;
+            cursor: pointer; font-size: 11px; text-align: left;
+            width: 100%; transition: color 0.2s, background 0.2s;
+            font-family: 'Inter', Arial, sans-serif;
+        `;
+        btn.onmouseenter = () => {{ btn.style.background = 'rgba(255,255,255,0.05)'; }};
+        btn.onmouseleave = () => {{ btn.style.background = 'transparent'; }};
         let on = defaultOn;
         btn.onclick = () => {{
             on = !on;
             map.setLayoutProperty(layerId, 'visibility', on ? 'visible' : 'none');
-            btn.textContent = (on ? '✅ ' : '⬜ ') + label;
+            btn.textContent = (on ? '🟢' : '⚫') + ' ' + label;
+            btn.style.color = on ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.4)';
         }};
         return btn;
     }}
 
     toggleContainer.appendChild(makeToggle('🔥 Fire Perimeters', 'fire-perimeter-fill', true));
     toggleContainer.appendChild(makeToggle('⚡ Storm Reports', 'lightning-strikes', true));
+    toggleContainer.appendChild(makeToggle('🌀 Hurricanes', 'storm-track', true));
+    toggleContainer.appendChild(makeToggle('🔥 Fire Heatmap', 'fire-heat', true));
     toggleContainer.appendChild(makeToggle('NEXRAD Radar', 'nexrad-layer', true));
     toggleContainer.appendChild(makeToggle('GOES Infrared', 'goes-ir-layer', false));
     toggleContainer.appendChild(makeToggle('Affected Counties', 'counties-fill', true));
@@ -1792,11 +2054,16 @@ function setupLayers() {{
 
 
     // ── LOAD STATS WITH RETRY ────────────────────────
+    // Global hazard data for stat card fly-to
+    let _latestWarnings    = null;
+    let _latestEarthquakes = null;
+    let _latestFires       = null;
+
     function loadData() {{
         fetch('/api/summary').then(r => r.json()).then(data => {{
             const s = data.summary || {{}};
             const hasData = (s.warnings_count > 0 || s.earthquakes > 0 || s.wildfires > 0);
-            
+
             document.getElementById('stat-warnings').textContent = s.warnings_count || 0;
             document.getElementById('stat-eq').textContent       = s.earthquakes    || 0;
             document.getElementById('stat-fires').textContent    = s.wildfires      || 0;
@@ -1810,18 +2077,29 @@ function setupLayers() {{
                     ? (pop/1000000).toFixed(1) + 'M'
                     : pop > 1000 ? (pop/1000).toFixed(0) + 'K' : pop;
             }}
-            
+
             if (data.last_update && data.last_update !== 'Never') {{
                 document.getElementById('update-time').textContent = 'LAST UPDATED: ' + data.last_update;
+                // ── AGE INDICATOR ─────────────────────────────
+                const dotEl = document.getElementById('live-dot');
+                const parsed = new Date(data.last_update.replace(' ', 'T'));
+                if (!isNaN(parsed)) {{
+                    const ageMin = (Date.now() - parsed.getTime()) / 60000;
+                    const dotColor = ageMin < 15 ? '#00FF88' : ageMin < 40 ? '#FFCC00' : '#FF4400';
+                    dotEl.style.setProperty('--dot-color', dotColor);
+                    dotEl.style.background = dotColor;
+                    dotEl.style.boxShadow = `0 0 8px ${{dotColor}}`;
+                }}
             }} else {{
                 document.getElementById('update-time').textContent = 'ACQUIRING LIVE DATA...';
             }}
 
             // Refresh all map sources with fresh data
             if (map.loaded()) {{
-                ['warnings','spc','earthquakes','fires','counties','infrastructure','lightning','fire-perimeters'].forEach(src => {{
+                ['warnings','spc','earthquakes','fires','fires-heat','counties',
+                 'infrastructure','lightning','fire_perimeters','storms'].forEach(src => {{
                     if (map.getSource(src)) {{
-                        map.getSource(src).setData('/api/' + src + '?t=' + Date.now());
+                        map.getSource(src).setData('/api/' + src.replace('-heat','') + '?t=' + Date.now());
                     }}
                 }});
             }}
@@ -1830,11 +2108,79 @@ function setupLayers() {{
             if (!hasData) {{
                 console.log('No data yet, retrying in 10s...');
                 setTimeout(loadData, 10000);
+                return;
+            }}
+
+            // ── STAT CARD FLY-TO ─────────────────────────
+            // Fetch hazard centroids once data is loaded, wire up click handlers
+            if (!_latestWarnings) {{
+                fetch('/api/warnings').then(r=>r.json()).then(d=>{{ _latestWarnings = d; wireStatCards(); }}).catch(()=>{{}});
+                fetch('/api/earthquakes').then(r=>r.json()).then(d=>{{ _latestEarthquakes = d; wireStatCards(); }}).catch(()=>{{}});
+                fetch('/api/fires').then(r=>r.json()).then(d=>{{ _latestFires = d; wireStatCards(); }}).catch(()=>{{}});
             }}
         }}).catch(err => {{
             console.log('Fetch failed, retrying in 10s...', err);
             setTimeout(loadData, 10000);
         }});
+    }}
+
+    function wireStatCards() {{
+        // Warnings card → fly to centroid of all warning features
+        const warnEl = document.getElementById('stat-warnings').closest('.stat-card');
+        if (warnEl && _latestWarnings?.features?.length) {{
+            warnEl.onclick = () => {{
+                try {{
+                    const pts = _latestWarnings.features.flatMap(f => {{
+                        const c = f.geometry?.coordinates;
+                        if (!c) return [];
+                        const flat = [];
+                        const walk = a => Array.isArray(a[0]) ? a.forEach(walk) : flat.push(a);
+                        walk(c); return flat;
+                    }});
+                    if (pts.length) {{
+                        const lng = pts.reduce((s,p)=>s+p[0],0)/pts.length;
+                        const lat = pts.reduce((s,p)=>s+p[1],0)/pts.length;
+                        map.flyTo({{center:[lng,lat], zoom:5, duration:1400}});
+                    }}
+                }} catch(e) {{}}
+            }};
+        }}
+
+        // Earthquakes card → fly to largest earthquake
+        const eqEl = document.getElementById('stat-eq').closest('.stat-card');
+        if (eqEl && _latestEarthquakes?.features?.length) {{
+            eqEl.onclick = () => {{
+                const biggest = _latestEarthquakes.features
+                    .filter(f => f.geometry?.coordinates)
+                    .sort((a,b) => (b.properties?.mag||0) - (a.properties?.mag||0))[0];
+                if (biggest) {{
+                    const [lng, lat] = biggest.geometry.coordinates;
+                    map.flyTo({{center:[lng,lat], zoom:6, duration:1400}});
+                }}
+            }};
+        }}
+
+        // Fires card → fly to densest fire area
+        const fireEl = document.getElementById('stat-fires').closest('.stat-card');
+        if (fireEl && _latestFires?.features?.length) {{
+            fireEl.onclick = () => {{
+                try {{
+                    const pts = _latestFires.features.filter(f=>f.geometry?.coordinates);
+                    if (pts.length) {{
+                        // Find centroid
+                        const lng = pts.reduce((s,f)=>s+f.geometry.coordinates[0],0)/pts.length;
+                        const lat = pts.reduce((s,f)=>s+f.geometry.coordinates[1],0)/pts.length;
+                        map.flyTo({{center:[lng,lat], zoom:5, duration:1400}});
+                    }}
+                }} catch(e) {{}}
+            }};
+        }}
+
+        // SPC card → fly to center of CONUS (SPC covers CONUS)
+        const spcEl = document.getElementById('stat-spc').closest('.stat-card');
+        if (spcEl) {{
+            spcEl.onclick = () => map.flyTo({{center:[-98.35,39.5], zoom:4, duration:1400}});
+        }}
     }}
 
     // Load immediately then every 5 minutes
