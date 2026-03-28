@@ -730,7 +730,14 @@ def schedule_updates(interval_minutes=30):
 # ─────────────────────────────────────────────
 # DASH APP
 # ─────────────────────────────────────────────
-app = dash.Dash(__name__, title="National Hazard Monitor", update_title=None)
+app = dash.Dash(
+    __name__,
+    title="National Hazard Monitor",
+    update_title=None,
+    external_stylesheets=[
+        "https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Fira+Sans:wght@300;400;500;600;700&display=swap"
+    ]
+)
 server = app.server  # Expose Flask server for Render
 
 # Use Flask's before_first_request to start background thread
@@ -2749,77 +2756,118 @@ function clearSearch(resetInput=true) {{
     return response
 
 app.layout = html.Div(
-    style={"backgroundColor": "#0a0a0a", "minHeight": "100vh",
-           "fontFamily": "Arial, sans-serif", "color": "white"},
+    style={
+        "backgroundColor": "#0A0A0A", "minHeight": "100vh",
+        "fontFamily": "'Fira Sans', sans-serif", "color": "#FFFFFF"
+    },
     children=[
         dcc.Interval(id="refresh", interval=5*60*1000, n_intervals=0),
 
         # Header
         html.Div(style={
-            "backgroundColor": "#111", "borderBottom": "2px solid #1B4F72",
+            "backgroundColor": "#111111",
+            "borderBottom": "2px solid #7C3AED",
             "padding": "16px 24px", "display": "flex",
             "justifyContent": "space-between", "alignItems": "center"
         }, children=[
             html.Div([
-                html.H1("🌪 National All-Hazards Monitor",
-                    style={"margin": "0", "fontSize": "22px", "color": "#AAD4FF"}),
+                html.H1("National All-Hazards Monitor",
+                    style={
+                        "margin": "0", "fontSize": "20px",
+                        "fontFamily": "'Fira Code', monospace",
+                        "fontWeight": "600",
+                        "color": "#A78BFA",
+                        "letterSpacing": "0.5px"
+                    }),
                 html.P([
                     "Real-time hazard tracking | NWS · NHC · SPC · USGS · NASA · Census  ",
-                    html.A("🗺 Open Mapbox Map →", href="/mapbox", target="_blank",
-                           style={"color": "#AAD4FF", "fontSize": "11px", "textDecoration": "none"})
-                ], style={"margin": "4px 0 0 0", "fontSize": "11px", "color": "#888"})
+                    html.A("Open Mapbox Map →", href="/mapbox", target="_blank",
+                           className="mapbox-link")
+                ], style={
+                    "margin": "6px 0 0 0", "fontSize": "11px",
+                    "color": "rgba(255,255,255,0.45)",
+                    "display": "flex", "alignItems": "center", "gap": "12px"
+                })
             ]),
             html.Div([
-                html.P(id="last-updated", style={"margin": "0", "fontSize": "12px",
-                       "color": "#aaa", "textAlign": "right"}),
+                html.P(id="last-updated", style={
+                    "margin": "0", "fontSize": "12px",
+                    "fontFamily": "'Fira Code', monospace",
+                    "color": "rgba(255,255,255,0.55)", "textAlign": "right"
+                }),
                 html.P("Auto-refreshes every 30 minutes",
-                    style={"margin": "2px 0 0 0", "fontSize": "10px",
-                           "color": "#666", "textAlign": "right"})
+                    style={
+                        "margin": "4px 0 0 0", "fontSize": "10px",
+                        "color": "rgba(255,255,255,0.3)", "textAlign": "right",
+                        "letterSpacing": "0.3px"
+                    })
             ])
         ]),
 
         # Stat cards
         html.Div(id="stat-cards",
-            style={"display": "flex", "gap": "10px",
-                   "padding": "14px 24px", "flexWrap": "wrap"}),
+            style={
+                "display": "flex", "gap": "10px",
+                "padding": "16px 24px", "flexWrap": "wrap"
+            }),
 
         # Map + Charts
-        html.Div(style={"display": "flex", "gap": "14px",
-                        "padding": "0 24px 14px 24px"}, children=[
+        html.Div(style={
+            "display": "flex", "gap": "14px",
+            "padding": "0 24px 14px 24px"
+        }, children=[
             # Map
             html.Div(style={"flex": "2", "minWidth": "0"}, children=[
-                html.Div("Live Hazard Map", style={
-                    "backgroundColor": "#1a1a1a", "padding": "8px 12px",
-                    "borderRadius": "6px 6px 0 0", "fontSize": "13px",
-                    "color": "#AAD4FF", "fontWeight": "bold",
-                    "borderBottom": "1px solid #333"
-                }),
-                html.Div(id="map-container", style={
-                    "width": "100%", "height": "480px",
-                    "backgroundColor": "#111", "overflow": "hidden",
-                    "borderRadius": "0 0 6px 6px"
-                })
+                html.Div(style={
+                    "backgroundColor": "#111111",
+                    "border": "1px solid rgba(124,58,237,0.25)",
+                    "borderRadius": "12px",
+                    "overflow": "hidden"
+                }, children=[
+                    html.Div("Live Hazard Map", style={
+                        "padding": "10px 14px", "fontSize": "12px",
+                        "fontFamily": "'Fira Code', monospace", "fontWeight": "600",
+                        "color": "#A78BFA", "letterSpacing": "0.5px",
+                        "textTransform": "uppercase",
+                        "borderBottom": "1px solid rgba(124,58,237,0.25)"
+                    }),
+                    html.Div(id="map-container", style={
+                        "width": "100%", "height": "480px",
+                        "backgroundColor": "#0f0f0f", "overflow": "hidden"
+                    })
+                ])
             ]),
             # Charts
-            html.Div(style={"flex": "1", "minWidth": "260px",
-                            "display": "flex", "flexDirection": "column",
-                            "gap": "12px"}, children=[
-                html.Div(style={"backgroundColor": "#1a1a1a",
-                                "borderRadius": "6px", "overflow": "hidden"}, children=[
+            html.Div(style={
+                "flex": "1", "minWidth": "260px",
+                "display": "flex", "flexDirection": "column", "gap": "12px"
+            }, children=[
+                html.Div(style={
+                    "backgroundColor": "#111111",
+                    "border": "1px solid rgba(124,58,237,0.25)",
+                    "borderRadius": "12px", "overflow": "hidden"
+                }, children=[
                     html.Div("Active Warnings by Type", style={
-                        "padding": "8px 12px", "fontSize": "13px",
-                        "color": "#AAD4FF", "fontWeight": "bold",
-                        "borderBottom": "1px solid #333"
+                        "padding": "10px 14px", "fontSize": "12px",
+                        "fontFamily": "'Fira Code', monospace", "fontWeight": "600",
+                        "color": "#A78BFA", "letterSpacing": "0.5px",
+                        "textTransform": "uppercase",
+                        "borderBottom": "1px solid rgba(124,58,237,0.25)"
                     }),
                     dcc.Graph(id="bar-chart", style={"height": "200px"},
                               config={"displayModeBar": False})
                 ]),
-                html.Div(style={"backgroundColor": "#1a1a1a",
-                                "borderRadius": "6px", "overflow": "hidden"}, children=[
+                html.Div(style={
+                    "backgroundColor": "#111111",
+                    "border": "1px solid rgba(124,58,237,0.25)",
+                    "borderRadius": "12px", "overflow": "hidden"
+                }, children=[
                     html.Div("Alert Level Breakdown", style={
-                        "padding": "8px 12px", "fontSize": "13px",
-                        "color": "#AAD4FF", "fontWeight": "bold",
-                        "borderBottom": "1px solid #333"
+                        "padding": "10px 14px", "fontSize": "12px",
+                        "fontFamily": "'Fira Code', monospace", "fontWeight": "600",
+                        "color": "#A78BFA", "letterSpacing": "0.5px",
+                        "textTransform": "uppercase",
+                        "borderBottom": "1px solid rgba(124,58,237,0.25)"
                     }),
                     dcc.Graph(id="donut-chart", style={"height": "200px"},
                               config={"displayModeBar": False})
@@ -2828,17 +2876,21 @@ app.layout = html.Div(
         ]),
 
         # Counties table
-        html.Div(style={"padding": "0 24px 24px 24px"}, children=[
-            html.Div(style={"backgroundColor": "#1a1a1a", "borderRadius": "6px",
-                            "overflow": "hidden"}, children=[
+        html.Div(style={"padding": "0 24px 28px 24px"}, children=[
+            html.Div(style={
+                "backgroundColor": "#111111",
+                "border": "1px solid rgba(124,58,237,0.25)",
+                "borderRadius": "12px", "overflow": "hidden"
+            }, children=[
                 html.Div("Affected Counties", style={
-                    "padding": "8px 12px", "fontSize": "13px",
-                    "color": "#AAD4FF", "fontWeight": "bold",
-                    "borderBottom": "1px solid #333"
+                    "padding": "10px 14px", "fontSize": "12px",
+                    "fontFamily": "'Fira Code', monospace", "fontWeight": "600",
+                    "color": "#A78BFA", "letterSpacing": "0.5px",
+                    "textTransform": "uppercase",
+                    "borderBottom": "1px solid rgba(124,58,237,0.25)"
                 }),
                 html.Div(id="counties-table",
-                    style={"padding": "12px", "maxHeight": "300px",
-                           "overflowY": "auto"})
+                    style={"maxHeight": "300px", "overflowY": "auto"})
             ])
         ])
     ]
@@ -2862,25 +2914,38 @@ def update_ui(n):
     s   = state["summary"]
     pop = s.get("total_population", 0)
 
-    def card(value, label, color="#AAD4FF", bg="#1B2A3A"):
+    def card(value, label, color="#A78BFA", glow_class="glow-purple"):
         return html.Div(style={
-            "backgroundColor": bg, "borderRadius": "8px",
-            "padding": "14px 18px", "minWidth": "130px", "flex": "1",
-            "border": f"1px solid {color}22"
+            "backgroundColor": "#111111",
+            "borderRadius": "12px",
+            "padding": "16px 20px",
+            "minWidth": "130px",
+            "flex": "1",
+            "border": f"1px solid {color}33",
+            "transition": "all 200ms ease",
+            "cursor": "pointer"
         }, children=[
-            html.Div(str(value), style={"fontSize": "28px", "fontWeight": "bold",
-                                         "color": color, "lineHeight": "1"}),
-            html.Div(label, style={"fontSize": "11px", "color": "#888", "marginTop": "4px"})
+            html.Div(str(value), style={
+                "fontSize": "28px", "fontWeight": "700",
+                "color": color, "lineHeight": "1",
+                "fontFamily": "'Fira Code', monospace",
+                "textShadow": f"0 0 10px {color}80"
+            }),
+            html.Div(label, style={
+                "fontSize": "10px", "color": "rgba(255,255,255,0.45)",
+                "marginTop": "6px", "letterSpacing": "0.8px",
+                "textTransform": "uppercase", "fontWeight": "500"
+            })
         ])
 
     stat_cards = [
-        card(s.get("warnings_count", 0),   "Active Warnings",      "#FF6666", "#2A1B1B"),
-        card(s.get("counties_count", 0),   "Affected Counties",    "#FF9900", "#2A1E0A"),
-        card(f"{pop:,}" if pop else "N/A", "Population at Risk",   "#FF6600", "#2A1500"),
-        card(s.get("spc_zones", 0),        "SPC Outlook Zones",    "#76FF7A", "#0A1A0A"),
-        card(s.get("earthquakes", 0),      "Earthquakes M2.5+",    "#AAD4FF", "#1B2A3A"),
-        card(s.get("active_storms", 0),    "Active Hurricanes",    "#FF6600", "#2A1500"),
-        card(s.get("wildfires", 0),        "Fire Detections",      "#FF4500", "#2A0A00"),
+        card(s.get("warnings_count", 0),   "Active Warnings",      "#FF6666"),
+        card(s.get("counties_count", 0),   "Affected Counties",    "#F97316"),
+        card(f"{pop:,}" if pop else "N/A", "Population at Risk",   "#F97316"),
+        card(s.get("spc_zones", 0),        "SPC Outlook Zones",    "#76FF7A"),
+        card(s.get("earthquakes", 0),      "Earthquakes M2.5+",    "#A78BFA"),
+        card(s.get("active_storms", 0),    "Active Hurricanes",    "#F97316"),
+        card(s.get("wildfires", 0),        "Fire Detections",      "#FF4500"),
     ]
 
     # Map
@@ -2908,11 +2973,11 @@ def update_ui(n):
             textfont=dict(color="white", size=10)
         ))
     bar_fig.update_layout(
-        paper_bgcolor="#1a1a1a", plot_bgcolor="#1a1a1a",
-        font=dict(color="white", size=10),
+        paper_bgcolor="#111111", plot_bgcolor="#111111",
+        font=dict(color="rgba(255,255,255,0.7)", size=10, family="Fira Sans"),
         margin=dict(l=10, r=10, t=10, b=40),
-        xaxis=dict(tickfont=dict(size=9), gridcolor="#333"),
-        yaxis=dict(gridcolor="#333", showticklabels=False),
+        xaxis=dict(tickfont=dict(size=9), gridcolor="rgba(124,58,237,0.15)"),
+        yaxis=dict(gridcolor="rgba(124,58,237,0.15)", showticklabels=False),
         showlegend=False
     )
 
@@ -2934,22 +2999,36 @@ def update_ui(n):
             textposition="inside"
         ))
     donut_fig.update_layout(
-        paper_bgcolor="#1a1a1a", font=dict(color="white", size=10),
+        paper_bgcolor="#111111", font=dict(color="rgba(255,255,255,0.7)", size=10, family="Fira Sans"),
         margin=dict(l=10, r=10, t=10, b=10),
-        legend=dict(font=dict(color="white"), bgcolor="#1a1a1a"),
+        legend=dict(font=dict(color="rgba(255,255,255,0.65)"), bgcolor="#111111"),
         showlegend=True
     )
 
     # Counties table
     if not affected:
         counties_html = html.P("No active warnings detected",
-                               style={"color": "#666", "fontSize": "13px"})
+                               style={
+                                   "color": "rgba(255,255,255,0.3)",
+                                   "fontSize": "13px",
+                                   "padding": "16px",
+                                   "fontFamily": "'Fira Code', monospace"
+                               })
     else:
-        hstyle = {"padding": "6px 10px", "fontSize": "11px", "color": "#888",
-                  "textAlign": "left", "borderBottom": "1px solid #333",
-                  "backgroundColor": "#111"}
-        cstyle = {"padding": "6px 10px", "fontSize": "12px",
-                  "borderBottom": "1px solid #1a1a1a"}
+        hstyle = {
+            "padding": "8px 12px", "fontSize": "10px",
+            "fontFamily": "'Fira Code', monospace",
+            "color": "rgba(255,255,255,0.45)",
+            "textAlign": "left",
+            "borderBottom": "1px solid rgba(124,58,237,0.25)",
+            "backgroundColor": "#111111",
+            "textTransform": "uppercase", "letterSpacing": "0.5px"
+        }
+        cstyle = {
+            "padding": "8px 12px", "fontSize": "12px",
+            "fontFamily": "'Fira Sans', sans-serif",
+            "borderBottom": "1px solid rgba(255,255,255,0.04)"
+        }
         header = html.Tr([
             html.Th(h, style=hstyle)
             for h in ["County", "State", "Population", "Event", "Level"]
@@ -2957,14 +3036,16 @@ def update_ui(n):
         rows = []
         for i, c in enumerate(affected):
             sig   = c.get("sig", "")
-            color = {"Warning":"#FF6666","Watch":"#FF9900","Advisory":"#FFFF00"}.get(sig,"white")
+            color = {"Warning": "#FF6666", "Watch": "#F97316", "Advisory": "#FFFF00"}.get(sig, "rgba(255,255,255,0.7)")
             rows.append(html.Tr([
                 html.Td(c.get("county",""),                style=cstyle),
                 html.Td(c.get("state",""),                 style=cstyle),
-                html.Td(f"{c.get('population',0):,}",      style=cstyle),
+                html.Td(f"{c.get('population',0):,}",      style={**cstyle, "fontFamily": "'Fira Code', monospace"}),
                 html.Td(c.get("event",""),                 style=cstyle),
-                html.Td(sig, style={**cstyle, "color": color, "fontWeight": "bold"})
-            ], style={"backgroundColor": "#111" if i%2==0 else "#161616"}))
+                html.Td(sig, style={**cstyle, "color": color, "fontWeight": "700",
+                                    "fontFamily": "'Fira Code', monospace",
+                                    "textShadow": f"0 0 8px {color}60"})
+            ], style={"backgroundColor": "#111111" if i%2==0 else "rgba(124,58,237,0.04)"}))
         counties_html = html.Table(
             [html.Thead(header), html.Tbody(rows)],
             style={"width": "100%", "borderCollapse": "collapse"}
