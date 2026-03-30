@@ -62,3 +62,71 @@ The Mapbox page is a large f-string returned by the `mapbox_map()` Flask route. 
 - `gevent` monkey-patch must happen before all other imports (first lines of `app.py`) to fix SSL recursion issues with gunicorn gevent workers.
 - `folium` is only used for the Dash layout map, not the Mapbox page.
 - No pandas usage despite it being in `requirements.txt`.
+
+---
+
+## Development Strategy
+
+Follow this strategy for every change to `app.py` or any other project file.
+
+### 1. Plan Mode Default
+
+Before writing any code, enter Plan Mode to think through the full approach:
+- Identify every file and code section that will be affected
+- Anticipate side effects and edge cases (circular callbacks, f-string escaping, Dash component namespaces)
+- Confirm the plan looks right before writing a single line
+
+### 2. Subagent Strategy
+
+Use subagents for research and exploration tasks to protect the main context window:
+- Spawn an Explore subagent to read and understand large files before editing
+- Use subagents in parallel when multiple independent investigations are needed
+- Never duplicate work a subagent is already doing
+
+### 3. Self-Improvement Loop
+
+After completing a task, review the result critically:
+- Re-read every changed file section to catch regressions, typos, or missed edge cases
+- If something looks off, fix it immediately rather than leaving it for the user to find
+- Ask: "Is this the simplest correct solution, or did I over-engineer it?"
+
+### 4. Verification Before Done
+
+Before declaring a task complete:
+- Mentally trace the execution path end-to-end (data fetch → state → API → JS → UI)
+- Check that every new Dash component uses the correct namespace (`dcc.` vs `html.`)
+- Check that new f-string content escapes `{` and `}` as `{{` and `}}` inside Mapbox page strings
+- Confirm all new env vars are documented in `.env.example`
+
+### 5. Demand Elegance
+
+Prefer the smallest change that achieves the goal:
+- CSS-only solutions over Python layout changes when possible
+- Clientside callbacks over server round-trips for pure UI state
+- No new files, abstractions, or helpers unless clearly necessary
+- No backwards-compatibility shims — just change the code
+
+### 6. Autonomous Bug Fixing
+
+When a deploy or runtime error occurs:
+- Read the full error message and traceback before touching any code
+- Identify the root cause (don't guess — find the exact line)
+- Fix only what is broken; don't refactor surrounding code
+- Commit the fix with a clear message describing the cause
+
+### Task Management
+
+For every non-trivial change, follow this workflow:
+
+1. **Plan First** — use Plan Mode to map out affected files and steps
+2. **Verify Plan** — confirm approach handles edge cases before coding
+3. **Track Progress** — use TaskCreate to break work into discrete steps; mark each done immediately
+4. **Explain Changes** — write commit messages that explain *why*, not just *what*
+5. **Document Results** — update CLAUDE.md if new patterns or gotchas are discovered
+6. **Capture Lessons** — save non-obvious insights to memory so future sessions benefit
+
+### Core Principles
+
+- **Simplicity First** — the right solution is the smallest one that works correctly
+- **No Laziness** — read the code before touching it; never guess at structure
+- **Minimal Impact** — change only what the task requires; leave everything else untouched
