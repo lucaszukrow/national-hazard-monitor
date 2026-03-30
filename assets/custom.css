@@ -156,3 +156,107 @@ body {
   * { transition: none !important; }
   .stat-value { text-shadow: none !important; }
 }
+
+/* ── Tablet (≤1024px) ── */
+@media (max-width: 1024px) {
+  /* Prevent charts column from being squeezed too hard */
+  #stat-cards + div > div:last-child {
+    min-width: 200px !important;
+  }
+}
+
+/* ── Mobile (≤768px) ── */
+@media (max-width: 768px) {
+  /* Header: stack title block and timestamp block vertically */
+  div:has(> div > #last-updated) {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 8px !important;
+    padding: 12px 16px !important;
+  }
+
+  /* Timestamp: left-align on mobile */
+  #last-updated {
+    text-align: left !important;
+  }
+
+  /* Stat cards: 2-column grid */
+  #stat-cards {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
+    padding: 12px 16px !important;
+    gap: 8px !important;
+  }
+
+  /* Remove flex sizing so grid takes over */
+  #stat-cards > div {
+    min-width: 0 !important;
+    flex: none !important;
+  }
+
+  /* Map + Charts row: stack vertically */
+  #stat-cards + div {
+    flex-direction: column !important;
+    padding: 0 16px 12px 16px !important;
+  }
+
+  /* Map column: full width, remove flex sizing */
+  #stat-cards + div > div:first-child {
+    flex: none !important;
+    width: 100% !important;
+  }
+
+  /* Map iframe: reduce height on mobile */
+  #map-container {
+    height: 320px !important;
+  }
+
+  /* Charts column: full width */
+  #stat-cards + div > div:last-child {
+    flex: none !important;
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+
+  /* Counties section: tighter padding */
+  #stat-cards + div + div {
+    padding: 0 16px 20px 16px !important;
+  }
+
+  /* Counties table: horizontal scroll so columns don't wrap */
+  #counties-table {
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+  }
+
+  /* Ensure table doesn't collapse — min-width forces scroll instead */
+  #counties-table table {
+    min-width: 520px;
+  }
+}
+
+/* ── Very small screens (≤375px) ── */
+@media (max-width: 375px) {
+  /* Stat cards: single column */
+  #stat-cards {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* Tighter header padding */
+  div:has(> div > #last-updated) {
+    padding: 10px 12px !important;
+  }
+
+  /* Tighter section padding */
+  #stat-cards + div {
+    padding: 0 12px 10px 12px !important;
+  }
+
+  #stat-cards + div + div {
+    padding: 0 12px 16px 12px !important;
+  }
+
+  #stat-cards {
+    padding: 10px 12px !important;
+  }
+}
