@@ -3041,7 +3041,7 @@ app.layout = html.Div(
             # ── Watchzone search (center) ──────────────────────────────────
             html.Div([
                 html.Div([
-                    html.Input(
+                    dcc.Input(
                         id="watchzone-input",
                         type="text",
                         placeholder="Watch my area...",
