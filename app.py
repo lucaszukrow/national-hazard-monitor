@@ -34,6 +34,13 @@ try:
 except ImportError:
     _SENDGRID_AVAILABLE = False
 
+# Anthropic — optional; AI situation reports are silently disabled if not installed/configured
+try:
+    import anthropic as _anthropic_lib
+    _ANTHROPIC_AVAILABLE = True
+except ImportError:
+    _ANTHROPIC_AVAILABLE = False
+
 # ─────────────────────────────────────────────
 # DATA SOURCE URLs
 # ─────────────────────────────────────────────
@@ -43,8 +50,9 @@ USGS_EQ_URL  = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_da
 NHC_URL      = "https://www.nhc.noaa.gov/CurrentStorms.json"
 FIRMS_KEY        = os.environ.get("FIRMS_KEY", "")
 FIRMS_URL        = f"https://firms.modaps.eosdis.nasa.gov/api/area/csv/{FIRMS_KEY}/VIIRS_SNPP_NRT/-125,24,-66,50/2"
-SENDGRID_API_KEY = os.environ.get("SENDGRID_API_KEY", "")
-ALERT_EMAIL      = os.environ.get("ALERT_EMAIL", "")
+SENDGRID_API_KEY  = os.environ.get("SENDGRID_API_KEY", "")
+ALERT_EMAIL       = os.environ.get("ALERT_EMAIL", "")
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 CENSUS_URL   = "https://www2.census.gov/programs-surveys/popest/datasets/2020-2023/counties/totals/co-est2023-alldata.csv"
 COUNTIES_URL = "https://raw.githubusercontent.com/plotly/datasets/master/geojson-counties-fips.json"
 
@@ -594,6 +602,70 @@ def build_folium_map(warnings, spc, earthquakes, storms, fires):
 # EMAIL ALERTING (SendGrid)
 # Fires on new tornado warnings, hurricane warnings, and M5.0+ earthquakes
 # ─────────────────────────────────────────────
+
+def generate_sitrep():
+    """Call Claude Haiku to write a 3-paragraph emergency situation report.
+
+    Returns (report_text, raw_text_for_clipboard).
+    On any failure, raw_text_for_clipboard is None.
+    """
+    if not ANTHROPIC_API_KEY:
+        return "API key not configured. Set the ANTHROPIC_API_KEY environment variable to enable AI-generated situation reports.", None
+    if not _ANTHROPIC_AVAILABLE:
+        return "The anthropic package is not installed. Run: pip install anthropic", None
+
+    s        = state["summary"]
+    affected = s.get("affected_counties", [])
+
+    # Top 15 affected areas for context
+    top_areas = "\n".join(
+        f"  - {c.get('county','')}, {c.get('state','')} "
+        f"({c.get('event','')}, {c.get('sig','')})"
+        for c in affected[:15]
+    )
+
+    context = (
+        f"Report time: {state.get('last_update', 'Unknown')}\n"
+        f"Active NWS warnings / watches / advisories: {s.get('warnings_count', 0)}\n"
+        f"Counties under active warnings: {s.get('counties_count', 0)}\n"
+        f"Estimated population at risk: {s.get('total_population', 0):,}\n"
+        f"SPC severe weather outlook zones: {s.get('spc_zones', 0)}\n"
+        f"Earthquakes M2.5+ (past 24 h): {s.get('earthquakes', 0)}\n"
+        f"Active tropical storms / hurricanes: {s.get('active_storms', 0)}\n"
+        f"Active wildfire detections (satellite): {s.get('wildfires', 0)}\n"
+        + (f"\nTop affected areas:\n{top_areas}" if top_areas else "")
+    )
+
+    try:
+        ai_client = _anthropic_lib.Anthropic(api_key=ANTHROPIC_API_KEY)
+        response = ai_client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=800,
+            system=(
+                "You are a national emergency management professional writing situation "
+                "reports for emergency operations centers. Write concise, authoritative "
+                "briefings in plain language. Do not use bullet points or headers. "
+                "Write exactly 3 paragraphs separated by a blank line."
+            ),
+            messages=[{
+                "role": "user",
+                "content": (
+                    "Based on this real-time national hazard monitoring data, write a "
+                    "3-paragraph emergency situation briefing:\n\n"
+                    f"{context}\n\n"
+                    "Paragraph 1: Current active threats and overall hazard picture.\n"
+                    "Paragraph 2: Affected population scale and likely infrastructure impacts.\n"
+                    "Paragraph 3: Recommended protective actions and response priorities for emergency managers."
+                )
+            }]
+        )
+        text = response.content[0].text
+        return text, text
+    except _anthropic_lib.AuthenticationError:
+        return "Authentication failed — check your ANTHROPIC_API_KEY.", None
+    except Exception as e:
+        return f"Error generating report: {e}", None
+
 
 def send_alert_email(subject, body):
     """Send a plain-text alert email via SendGrid. Silently skips if unconfigured."""
@@ -2974,8 +3046,14 @@ app.layout = html.Div(
                         "margin": "4px 0 0 0", "fontSize": "10px",
                         "color": "rgba(255,255,255,0.3)", "textAlign": "right",
                         "letterSpacing": "0.3px"
-                    })
-            ])
+                    }),
+                html.Button(
+                    "⚡ Situation Report",
+                    id="sitrep-btn",
+                    className="sitrep-gen-btn",
+                    n_clicks=0
+                )
+            ], style={"display": "flex", "flexDirection": "column", "alignItems": "flex-end", "gap": "4px"})
         ]),
 
         # Stat cards
@@ -3065,6 +3143,44 @@ app.layout = html.Div(
                 }),
                 html.Div(id="counties-table",
                     style={"maxHeight": "300px", "overflowY": "auto"})
+            ])
+        ]),
+
+        # ── AI Situation Report modal ──────────────────────────────────────
+        dcc.Store(id="sitrep-store", data=""),
+        html.Div(id="sitrep-modal", style={"display": "none"}, children=[
+            html.Div(className="sitrep-overlay", children=[
+                html.Div(className="sitrep-card", children=[
+                    # Header
+                    html.Div(className="sitrep-card-header", children=[
+                        html.Div([
+                            html.Span("⚡", style={"fontSize": "16px"}),
+                            html.Span("AI Situation Report", style={
+                                "fontFamily": "'Fira Code', monospace",
+                                "fontSize": "13px", "fontWeight": "600",
+                                "color": "#A78BFA", "marginLeft": "8px",
+                                "letterSpacing": "0.5px", "textTransform": "uppercase"
+                            })
+                        ], style={"display": "flex", "alignItems": "center"}),
+                        html.Button("✕", id="sitrep-close", className="sitrep-close-btn", n_clicks=0)
+                    ]),
+                    # Body
+                    html.Div(id="sitrep-body", className="sitrep-card-body"),
+                    # Footer
+                    html.Div(className="sitrep-card-footer", children=[
+                        html.Button(
+                            "Copy to Clipboard",
+                            id="sitrep-copy-btn",
+                            className="sitrep-copy-btn",
+                            n_clicks=0
+                        ),
+                        html.Span(id="sitrep-copy-feedback", style={
+                            "fontSize": "11px", "color": "#76FF7A",
+                            "fontFamily": "'Fira Code', monospace",
+                            "marginLeft": "10px"
+                        })
+                    ])
+                ])
             ])
         ])
     ]
@@ -3233,6 +3349,64 @@ def update_ui(n):
         donut_fig,
         counties_html
     )
+
+
+@app.callback(
+    Output("sitrep-modal",  "style"),
+    Output("sitrep-body",   "children"),
+    Output("sitrep-store",  "data"),
+    Input("sitrep-btn",   "n_clicks"),
+    Input("sitrep-close", "n_clicks"),
+    prevent_initial_call=True
+)
+def handle_sitrep_modal(btn_clicks, close_clicks):
+    """Show modal with AI situation report, or hide it on close."""
+    if dash.ctx.triggered_id == "sitrep-close":
+        return {"display": "none"}, dash.no_update, dash.no_update
+
+    report_text, raw_text = generate_sitrep()
+
+    # Split on blank lines to render paragraphs
+    paragraphs = [
+        html.P(para.strip(), style={
+            "margin": "0 0 14px 0", "lineHeight": "1.75",
+            "color": "rgba(255,255,255,0.85)", "fontSize": "13px",
+            "fontFamily": "'Fira Sans', sans-serif"
+        })
+        for para in report_text.strip().split("\n\n") if para.strip()
+    ]
+
+    modal_visible = {"display": "block"}
+    return modal_visible, paragraphs, raw_text or ""
+
+
+app.clientside_callback(
+    """
+    function(n_clicks, raw_text) {
+        if (!n_clicks || !raw_text) return "";
+        try {
+            navigator.clipboard.writeText(raw_text);
+        } catch (e) {
+            // Fallback for non-HTTPS environments
+            var ta = document.createElement("textarea");
+            ta.value = raw_text;
+            ta.style.position = "fixed";
+            ta.style.opacity = "0";
+            document.body.appendChild(ta);
+            ta.focus();
+            ta.select();
+            document.execCommand("copy");
+            document.body.removeChild(ta);
+        }
+        return "Copied!";
+    }
+    """,
+    Output("sitrep-copy-feedback", "children"),
+    Input("sitrep-copy-btn", "n_clicks"),
+    dash.dependencies.State("sitrep-store", "data"),
+    prevent_initial_call=True
+)
+
 
 # ─────────────────────────────────────────────
 # START

@@ -6,3 +6,4 @@ pandas==2.2.3
 gunicorn==21.2.0
 gevent==23.9.1
 sendgrid==6.11.0
+anthropic
