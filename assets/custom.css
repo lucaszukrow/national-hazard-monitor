@@ -157,6 +157,68 @@ body {
   .stat-value { text-shadow: none !important; }
 }
 
+/* ── Watchzone search ── */
+.watchzone-search-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.watchzone-input {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 215, 0, 0.3);
+  border-radius: 6px;
+  color: var(--color-text);
+  font-family: 'Fira Code', monospace;
+  font-size: 11px;
+  padding: 5px 10px;
+  outline: none;
+  width: 180px;
+  transition: var(--transition);
+}
+
+.watchzone-input::placeholder {
+  color: rgba(255, 255, 255, 0.3);
+}
+
+.watchzone-input:focus {
+  border-color: #FFD700;
+  background: rgba(255, 215, 0, 0.07);
+  box-shadow: 0 0 8px rgba(255, 215, 0, 0.2);
+}
+
+.watchzone-clear-btn {
+  background: none;
+  border: 1px solid rgba(255, 215, 0, 0.4);
+  border-radius: 50%;
+  color: #FFD700;
+  font-size: 11px;
+  width: 22px;
+  height: 22px;
+  cursor: pointer;
+  transition: var(--transition);
+  line-height: 1;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.watchzone-clear-btn:hover {
+  background: rgba(255, 215, 0, 0.15);
+  border-color: #FFD700;
+}
+
+.watchzone-active-label {
+  font-family: 'Fira Code', monospace;
+  font-size: 10px;
+  font-weight: 600;
+  color: #FFD700;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  text-shadow: 0 0 8px rgba(255, 215, 0, 0.5);
+  min-height: 14px;
+  text-align: center;
+}
+
 /* ── Situation Report generate button ── */
 .sitrep-gen-btn {
   background: rgba(249, 115, 22, 0.1);
@@ -286,6 +348,11 @@ body {
   /* Timestamp: left-align on mobile */
   #last-updated {
     text-align: left !important;
+  }
+
+  /* Watchzone search: full width on mobile */
+  .watchzone-input {
+    width: 140px !important;
   }
 
   /* Stat cards: 2-column grid */

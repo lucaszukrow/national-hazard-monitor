@@ -3035,6 +3035,32 @@ app.layout = html.Div(
                     "display": "flex", "alignItems": "center", "gap": "12px"
                 })
             ]),
+            # ── Watchzone search (center) ──────────────────────────────────
+            html.Div([
+                html.Div([
+                    html.Input(
+                        id="watchzone-input",
+                        type="text",
+                        placeholder="Watch my area...",
+                        debounce=True,
+                        maxLength=50,
+                        className="watchzone-input",
+                        value=""
+                    ),
+                    html.Button(
+                        "✕",
+                        id="watchzone-clear-btn",
+                        className="watchzone-clear-btn",
+                        n_clicks=0,
+                        style={"display": "none"}
+                    )
+                ], className="watchzone-search-row"),
+                html.Div(
+                    id="watchzone-active-label",
+                    className="watchzone-active-label"
+                )
+            ], style={"display": "flex", "flexDirection": "column", "alignItems": "center", "gap": "4px"}),
+
             html.Div([
                 html.P(id="last-updated", style={
                     "margin": "0", "fontSize": "12px",
@@ -3083,6 +3109,7 @@ app.layout = html.Div(
                         "textTransform": "uppercase",
                         "borderBottom": "1px solid rgba(124,58,237,0.25)"
                     }),
+                    html.Div(id="watchzone-map-badge", style={"display": "none"}),
                     html.Div(id="map-container", style={
                         "width": "100%", "height": "480px",
                         "backgroundColor": "#0f0f0f", "overflow": "hidden"
@@ -3146,6 +3173,9 @@ app.layout = html.Div(
             ])
         ]),
 
+        # ── Watchzone persistent store (localStorage) ─────────────────────
+        dcc.Store(id="watchzone-store", storage_type="local", data=""),
+
         # ── AI Situation Report modal ──────────────────────────────────────
         dcc.Store(id="sitrep-store", data=""),
         html.Div(id="sitrep-modal", style={"display": "none"}, children=[
@@ -3193,16 +3223,32 @@ app.layout = html.Div(
      Output("bar-chart",     "figure"),
      Output("donut-chart",   "figure"),
      Output("counties-table","children")],
-    Input("refresh", "n_intervals")
+    Input("refresh", "n_intervals"),
+    Input("watchzone-store", "data")
 )
-def update_ui(n):
+def update_ui(n, watchzone):
     # Trigger update if data is stale or never loaded
     if state["last_update"] == "Never" and not state["updating"]:
         print("Dashboard triggered data update...")
         t = threading.Thread(target=run_update, daemon=True)
         t.start()
     s   = state["summary"]
-    pop = s.get("total_population", 0)
+
+    # ── Watchzone filter ──────────────────────────────────────────────────
+    wz = (watchzone or "").strip().upper()
+    all_affected = s.get("affected_counties", [])
+    if wz:
+        affected = [
+            c for c in all_affected
+            if wz in (c.get("state") or "").upper()
+            or wz in (c.get("county") or "").upper()
+        ]
+    else:
+        affected = all_affected
+
+    filtered_pop   = sum(c.get("population", 0) for c in affected)
+    pop_display    = f"{filtered_pop:,}" if filtered_pop else "N/A"
+    suffix         = " ★" if wz else ""
 
     def card(value, label, color="#A78BFA", glow_class="glow-purple"):
         return html.Div(style={
@@ -3229,27 +3275,64 @@ def update_ui(n):
         ])
 
     stat_cards = [
-        card(s.get("warnings_count", 0),   "Active Warnings",      "#FF6666"),
-        card(s.get("counties_count", 0),   "Affected Counties",    "#F97316"),
-        card(f"{pop:,}" if pop else "N/A", "Population at Risk",   "#F97316"),
-        card(s.get("spc_zones", 0),        "SPC Outlook Zones",    "#76FF7A"),
-        card(s.get("earthquakes", 0),      "Earthquakes M2.5+",    "#A78BFA"),
-        card(s.get("active_storms", 0),    "Active Hurricanes",    "#F97316"),
-        card(s.get("wildfires", 0),        "Fire Detections",      "#FF4500"),
+        card(s.get("warnings_count", 0),   "Active Warnings",              "#FF6666"),
+        card(len(affected),                 "Affected Counties" + suffix,   "#F97316"),
+        card(pop_display,                   "Population at Risk" + suffix,  "#F97316"),
+        card(s.get("spc_zones", 0),        "SPC Outlook Zones",            "#76FF7A"),
+        card(s.get("earthquakes", 0),      "Earthquakes M2.5+",            "#A78BFA"),
+        card(s.get("active_storms", 0),    "Active Hurricanes",            "#F97316"),
+        card(s.get("wildfires", 0),        "Fire Detections",              "#FF4500"),
     ]
 
-    # Map
-    map_content = html.Iframe(
-        srcDoc=state.get("map_html", "<p style='color:white;padding:20px;'>Loading map...</p>"),
-        style={"width": "100%", "height": "480px", "border": "none"}
-    ) if state.get("map_html") else html.P(
-        "Map loading... Data update in progress.",
-        style={"color": "#666", "padding": "20px", "textAlign": "center"}
-    )
+    # Map — inject yellow highlight layer for watchzone when active
+    map_html_source = state.get("map_html", "")
+    if not map_html_source:
+        map_content = html.P(
+            "Map loading... Data update in progress.",
+            style={"color": "#666", "padding": "20px", "textAlign": "center"}
+        )
+    elif wz:
+        # Build minimal filtered GeoJSON to embed in the script (cap at 50 features)
+        matching_feats = [
+            {"type": "Feature",
+             "geometry": f.get("geometry"),
+             "properties": {"event": (f.get("properties") or {}).get("event", "")}}
+            for f in state.get("warnings", {}).get("features", [])
+            if f.get("geometry")
+            and wz in ((f.get("properties") or {}).get("areaDesc", "")).upper()
+        ][:50]
+        geojson_str = json.dumps({"type": "FeatureCollection", "features": matching_feats})
+        inject = (
+            "\n<script>\n"
+            "(function(){\n"
+            f"  var _g={geojson_str};\n"
+            "  var _t=setInterval(function(){\n"
+            "    var m=null;\n"
+            "    Object.keys(window).forEach(function(k){\n"
+            "      if(/^map_/.test(k)&&window[k]&&window[k].addLayer)m=window[k];\n"
+            "    });\n"
+            "    if(!m)return;\n"
+            "    clearInterval(_t);\n"
+            "    if(_g.features&&_g.features.length){\n"
+            "      L.geoJSON(_g,{style:{color:'#FFD700',weight:3,"
+            "fillOpacity:0.15,fillColor:'#FFD700'}}).addTo(m);\n"
+            "    }\n"
+            "  },250);\n"
+            "})();\n"
+            "</script>\n"
+            "</html>"
+        )
+        before, sep, _ = map_html_source.rpartition("</html>")
+        patched = (before + inject) if sep else map_html_source
+        map_content = html.Iframe(srcDoc=patched, style={"width": "100%", "height": "480px", "border": "none"})
+    else:
+        map_content = html.Iframe(
+            srcDoc=map_html_source,
+            style={"width": "100%", "height": "480px", "border": "none"}
+        )
 
     # Bar chart
     bar_fig = go.Figure()
-    affected = s.get("affected_counties", [])
     if affected:
         from collections import Counter
         phenom_counts = Counter(c.get("phenom","") for c in affected)
@@ -3297,7 +3380,11 @@ def update_ui(n):
 
     # Counties table
     if not affected:
-        counties_html = html.P("No active warnings detected",
+        no_data_msg = (
+            f"No counties matching '{wz}' found"
+            if wz else "No active warnings detected"
+        )
+        counties_html = html.P(no_data_msg,
                                style={
                                    "color": "rgba(255,255,255,0.3)",
                                    "fontSize": "13px",
@@ -3405,6 +3492,71 @@ app.clientside_callback(
     Input("sitrep-copy-btn", "n_clicks"),
     dash.dependencies.State("sitrep-store", "data"),
     prevent_initial_call=True
+)
+
+
+# ── Watchzone callbacks ───────────────────────────────────────────────────
+
+# 1. User types → save to localStorage store
+app.clientside_callback(
+    "function(v) { return (v !== undefined && v !== null) ? v : ''; }",
+    Output("watchzone-store", "data"),
+    Input("watchzone-input", "value"),
+    prevent_initial_call=True
+)
+
+# 2. Page load / store change → restore input value
+app.clientside_callback(
+    "function(stored) { return stored || ''; }",
+    Output("watchzone-input", "value"),
+    Input("watchzone-store", "data")
+)
+
+# 3. Store change → toggle clear button visibility + active label text
+app.clientside_callback(
+    """
+    function(stored) {
+        var active = stored && stored.trim().length > 0;
+        var clearStyle = active
+            ? {display: 'inline-flex', alignItems: 'center', justifyContent: 'center'}
+            : {display: 'none'};
+        var label = active ? 'Watching: ' + stored.trim().toUpperCase() : '';
+        return [clearStyle, label];
+    }
+    """,
+    [Output("watchzone-clear-btn", "style"),
+     Output("watchzone-active-label", "children")],
+    Input("watchzone-store", "data")
+)
+
+# 4. Clear button → wipe store
+app.clientside_callback(
+    "function(n) { return n > 0 ? '' : window.dash_clientside.no_update; }",
+    Output("watchzone-store", "data", allow_duplicate=True),
+    Input("watchzone-clear-btn", "n_clicks"),
+    prevent_initial_call=True
+)
+
+# 5. Store change → map badge visibility + text
+app.clientside_callback(
+    """
+    function(stored) {
+        if (stored && stored.trim()) {
+            return [
+                'Filtered to: ' + stored.trim().toUpperCase(),
+                {display: 'block', background: 'rgba(255,215,0,0.12)',
+                 borderBottom: '2px solid #FFD700',
+                 padding: '6px 14px', fontSize: '11px',
+                 fontFamily: "'Fira Code', monospace",
+                 color: '#FFD700', letterSpacing: '0.5px'}
+            ];
+        }
+        return ['', {display: 'none'}];
+    }
+    """,
+    [Output("watchzone-map-badge", "children"),
+     Output("watchzone-map-badge", "style")],
+    Input("watchzone-store", "data")
 )
 
 
