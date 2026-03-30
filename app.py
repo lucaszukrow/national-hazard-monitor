@@ -34,12 +34,12 @@ try:
 except ImportError:
     _SENDGRID_AVAILABLE = False
 
-# Anthropic — optional; AI situation reports are silently disabled if not installed/configured
+# Groq — optional; AI situation reports are silently disabled if not installed/configured
 try:
-    import anthropic as _anthropic_lib
-    _ANTHROPIC_AVAILABLE = True
+    from groq import Groq as _GroqClient
+    _GROQ_AVAILABLE = True
 except ImportError:
-    _ANTHROPIC_AVAILABLE = False
+    _GROQ_AVAILABLE = False
 
 # ─────────────────────────────────────────────
 # DATA SOURCE URLs
@@ -52,7 +52,7 @@ FIRMS_KEY        = os.environ.get("FIRMS_KEY", "")
 FIRMS_URL        = f"https://firms.modaps.eosdis.nasa.gov/api/area/csv/{FIRMS_KEY}/VIIRS_SNPP_NRT/-125,24,-66,50/2"
 SENDGRID_API_KEY  = os.environ.get("SENDGRID_API_KEY", "")
 ALERT_EMAIL       = os.environ.get("ALERT_EMAIL", "")
-ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 CENSUS_URL   = "https://www2.census.gov/programs-surveys/popest/datasets/2020-2023/counties/totals/co-est2023-alldata.csv"
 COUNTIES_URL = "https://raw.githubusercontent.com/plotly/datasets/master/geojson-counties-fips.json"
 
@@ -604,15 +604,15 @@ def build_folium_map(warnings, spc, earthquakes, storms, fires):
 # ─────────────────────────────────────────────
 
 def generate_sitrep():
-    """Call Claude Haiku to write a 3-paragraph emergency situation report.
+    """Call Groq (llama-3.3-70b-versatile) to write a 3-paragraph emergency situation report.
 
     Returns (report_text, raw_text_for_clipboard).
     On any failure, raw_text_for_clipboard is None.
     """
-    if not ANTHROPIC_API_KEY:
-        return "API key not configured. Set the ANTHROPIC_API_KEY environment variable to enable AI-generated situation reports.", None
-    if not _ANTHROPIC_AVAILABLE:
-        return "The anthropic package is not installed. Run: pip install anthropic", None
+    if not GROQ_API_KEY:
+        return "API key not configured. Set the GROQ_API_KEY environment variable to enable AI-generated situation reports.", None
+    if not _GROQ_AVAILABLE:
+        return "The groq package is not installed. Run: pip install groq", None
 
     s        = state["summary"]
     affected = s.get("affected_counties", [])
@@ -637,32 +637,35 @@ def generate_sitrep():
     )
 
     try:
-        ai_client = _anthropic_lib.Anthropic(api_key=ANTHROPIC_API_KEY)
-        response = ai_client.messages.create(
-            model="claude-haiku-4-5-20251001",
+        ai_client = _GroqClient(api_key=GROQ_API_KEY)
+        response = ai_client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
             max_tokens=800,
-            system=(
-                "You are a national emergency management professional writing situation "
-                "reports for emergency operations centers. Write concise, authoritative "
-                "briefings in plain language. Do not use bullet points or headers. "
-                "Write exactly 3 paragraphs separated by a blank line."
-            ),
-            messages=[{
-                "role": "user",
-                "content": (
-                    "Based on this real-time national hazard monitoring data, write a "
-                    "3-paragraph emergency situation briefing:\n\n"
-                    f"{context}\n\n"
-                    "Paragraph 1: Current active threats and overall hazard picture.\n"
-                    "Paragraph 2: Affected population scale and likely infrastructure impacts.\n"
-                    "Paragraph 3: Recommended protective actions and response priorities for emergency managers."
-                )
-            }]
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a national emergency management professional writing situation "
+                        "reports for emergency operations centers. Write concise, authoritative "
+                        "briefings in plain language. Do not use bullet points or headers. "
+                        "Write exactly 3 paragraphs separated by a blank line."
+                    )
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        "Based on this real-time national hazard monitoring data, write a "
+                        "3-paragraph emergency situation briefing:\n\n"
+                        f"{context}\n\n"
+                        "Paragraph 1: Current active threats and overall hazard picture.\n"
+                        "Paragraph 2: Affected population scale and likely infrastructure impacts.\n"
+                        "Paragraph 3: Recommended protective actions and response priorities for emergency managers."
+                    )
+                }
+            ]
         )
-        text = response.content[0].text
+        text = response.choices[0].message.content
         return text, text
-    except _anthropic_lib.AuthenticationError:
-        return "Authentication failed — check your ANTHROPIC_API_KEY.", None
     except Exception as e:
         return f"Error generating report: {e}", None
 
