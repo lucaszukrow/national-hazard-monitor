@@ -1060,8 +1060,14 @@ def fetch_air_quality():
             f"&API_KEY={AIRNOW_KEY}"
         )
         r = requests.get(url, timeout=20)
-        r.raise_for_status()
+        if r.status_code != 200:
+            print(f"  AirNow HTTP {r.status_code}: {r.text[:200]}")
+            r.raise_for_status()
         readings = r.json()
+        if isinstance(readings, dict) and readings.get("WebServiceError"):
+            print(f"  AirNow API error: {readings['WebServiceError']}")
+            return {"type": "FeatureCollection", "features": []}
+        print(f"  AirNow raw readings: {len(readings) if isinstance(readings, list) else 'not a list'}")
         # Deduplicate by station — keep highest AQI reading per location
         station_best = {}
         for item in readings:
