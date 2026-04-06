@@ -723,7 +723,7 @@ def send_alert_email(subject, body):
         return
     try:
         message = Mail(
-            from_email="alerts@nationalhazardmonitor.app",
+            from_email=ALERT_EMAIL,
             to_emails=ALERT_EMAIL,
             subject=subject,
             plain_text_content=body
