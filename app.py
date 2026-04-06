@@ -52,9 +52,27 @@ FIRMS_KEY        = os.environ.get("FIRMS_KEY", "")
 FIRMS_URL        = f"https://firms.modaps.eosdis.nasa.gov/api/area/csv/{FIRMS_KEY}/VIIRS_SNPP_NRT/-125,24,-66,50/2"
 SENDGRID_API_KEY  = os.environ.get("SENDGRID_API_KEY", "")
 ALERT_EMAIL       = os.environ.get("ALERT_EMAIL", "")
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
-CENSUS_URL   = "https://www2.census.gov/programs-surveys/popest/datasets/2020-2023/counties/totals/co-est2023-alldata.csv"
-COUNTIES_URL = "https://raw.githubusercontent.com/plotly/datasets/master/geojson-counties-fips.json"
+GROQ_API_KEY  = os.environ.get("GROQ_API_KEY", "")
+AIRNOW_KEY    = os.environ.get("AIRNOW_KEY", "")   # Free key at airnowapi.org
+CENSUS_URL    = "https://www2.census.gov/programs-surveys/popest/datasets/2020-2023/counties/totals/co-est2023-alldata.csv"
+COUNTIES_URL  = "https://raw.githubusercontent.com/plotly/datasets/master/geojson-counties-fips.json"
+
+# State geographic centroids — used to plot FEMA disaster declarations on the map
+STATE_CENTROIDS = {
+    "AL":[32.81,-86.79],"AK":[61.37,-152.40],"AZ":[33.73,-111.43],"AR":[34.97,-92.37],
+    "CA":[36.12,-119.68],"CO":[39.06,-105.31],"CT":[41.60,-72.76],"DE":[39.32,-75.51],
+    "FL":[27.77,-81.69],"GA":[33.04,-83.64],"HI":[21.09,-157.50],"ID":[44.24,-114.48],
+    "IL":[40.35,-88.99],"IN":[39.85,-86.26],"IA":[42.01,-93.21],"KS":[38.53,-96.73],
+    "KY":[37.67,-84.67],"LA":[31.17,-91.87],"ME":[44.69,-69.38],"MD":[39.06,-76.80],
+    "MA":[42.23,-71.53],"MI":[43.33,-84.54],"MN":[45.69,-93.90],"MS":[32.74,-89.68],
+    "MO":[38.46,-92.29],"MT":[46.92,-110.45],"NE":[41.13,-98.27],"NV":[38.31,-117.06],
+    "NH":[43.45,-71.56],"NJ":[40.30,-74.52],"NM":[34.84,-106.25],"NY":[42.17,-74.95],
+    "NC":[35.63,-79.81],"ND":[47.53,-99.78],"OH":[40.39,-82.76],"OK":[35.57,-96.93],
+    "OR":[44.57,-122.07],"PA":[40.59,-77.21],"RI":[41.68,-71.51],"SC":[33.86,-80.95],
+    "SD":[44.30,-99.44],"TN":[35.75,-86.69],"TX":[31.05,-97.56],"UT":[40.15,-111.86],
+    "VT":[44.05,-72.71],"VA":[37.77,-78.17],"WA":[47.40,-121.49],"WV":[38.49,-80.95],
+    "WI":[44.27,-89.62],"WY":[42.76,-107.30],"PR":[18.22,-66.59],
+}
 
 # ─────────────────────────────────────────────
 # STARTUP VALIDATION — warn on missing required keys
@@ -64,6 +82,8 @@ if not FIRMS_KEY:
     _missing_keys.append("FIRMS_KEY (wildfire data will be unavailable)")
 if not os.environ.get("MAPBOX_TOKEN"):
     _missing_keys.append("MAPBOX_TOKEN (/mapbox view will be broken)")
+if not AIRNOW_KEY:
+    _missing_keys.append("AIRNOW_KEY (air quality layer disabled — free key at airnowapi.org)")
 if _missing_keys:
     print("\n⚠  WARNING: Missing environment variables:")
     for k in _missing_keys:
@@ -160,8 +180,14 @@ state = {
     },
     "map_html": "",
     "updating": False,
-    "lightning": {"type": "FeatureCollection", "features": []},
-    "fire_perimeters": {"type": "FeatureCollection", "features": []},
+    "lightning":        {"type": "FeatureCollection", "features": []},
+    "fire_perimeters":  {"type": "FeatureCollection", "features": []},
+    "air_quality":      {"type": "FeatureCollection", "features": []},
+    "fema_disasters":   {"type": "FeatureCollection", "features": []},
+    "river_gauges":     {"type": "FeatureCollection", "features": []},
+    "volcanoes":        {"type": "FeatureCollection", "features": []},
+    "drought":          {"type": "FeatureCollection", "features": []},
+    "shelters":         {"type": "FeatureCollection", "features": []},
     # In-memory only — intentionally not cached so restarts don't suppress alerts
     # for events that are still active when the server comes back up
     "seen_alert_ids": set()
@@ -859,13 +885,19 @@ def run_update():
     print(f"{'='*50}")
 
     try:
-        warnings   = fetch_warnings()
-        spc        = fetch_spc()
-        earthquakes = fetch_earthquakes()
-        storms         = fetch_storms()
-        fires          = fetch_fires()
-        lightning      = fetch_lightning()
+        warnings        = fetch_warnings()
+        spc             = fetch_spc()
+        earthquakes     = fetch_earthquakes()
+        storms          = fetch_storms()
+        fires           = fetch_fires()
+        lightning       = fetch_lightning()
         fire_perimeters = fetch_fire_perimeters()
+        air_quality     = fetch_air_quality()
+        fema_disasters  = fetch_fema_disasters()
+        river_gauges    = fetch_river_gauges()
+        volcanoes       = fetch_volcanoes()
+        drought         = fetch_drought()
+        shelters        = fetch_shelters()
 
         # Load population once
         if not state["pop_data"]:
@@ -898,15 +930,21 @@ def run_update():
         # partially-updated state dict during the multi-key replacement.
         with state_lock:
             state.update({
-                "last_update":  datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "warnings":     warnings,
-                "spc":          spc,
-                "earthquakes":  earthquakes,
-                "storms":       storms,
-                "fires":        fires,
-                "lightning":    lightning,
+                "last_update":     datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "warnings":        warnings,
+                "spc":             spc,
+                "earthquakes":     earthquakes,
+                "storms":          storms,
+                "fires":           fires,
+                "lightning":       lightning,
                 "fire_perimeters": fire_perimeters,
-                "map_html":     map_html,
+                "air_quality":     air_quality,
+                "fema_disasters":  fema_disasters,
+                "river_gauges":    river_gauges,
+                "volcanoes":       volcanoes,
+                "drought":         drought,
+                "shelters":        shelters,
+                "map_html":        map_html,
                 "summary": {
                     "warnings_count":   len(warnings.get("features", [])),
                     "counties_count":   len(affected),
@@ -928,6 +966,12 @@ def run_update():
             "fires":           state["fires"],
             "lightning":       state["lightning"],
             "fire_perimeters": state["fire_perimeters"],
+            "air_quality":     state["air_quality"],
+            "fema_disasters":  state["fema_disasters"],
+            "river_gauges":    state["river_gauges"],
+            "volcanoes":       state["volcanoes"],
+            "drought":         state["drought"],
+            "shelters":        state["shelters"],
             "summary":         state["summary"],
             "map_html":        state["map_html"]
         })
@@ -980,6 +1024,11 @@ def fetch_fire_perimeters():
                 print(f"  Fire perimeters ArcGIS error: {data['error']}")
                 continue
             for feat in data.get("features", []):
+                # Skip Point/MultiPoint — those are fire location markers, not perimeters.
+                # Only Polygon/MultiPolygon render correctly as fill layers on the map.
+                geom_type = (feat.get("geometry") or {}).get("type", "")
+                if geom_type not in ("Polygon", "MultiPolygon"):
+                    continue
                 name = (feat.get("properties") or {}).get("IncidentName", "")
                 key = name.strip().upper() if name else None
                 if key and key in seen_names:
@@ -990,8 +1039,249 @@ def fetch_fire_perimeters():
         except Exception as e:
             print(f"  Fire perimeters failed ({url[:60]}...): {e}")
             continue
-    print(f"  Fire perimeters: {len(all_features)} active fires (merged)")
+    print(f"  Fire perimeters: {len(all_features)} active fire perimeters (merged, polygons only)")
     return {"type": "FeatureCollection", "features": all_features}
+
+def fetch_air_quality():
+    """Fetch current AQI readings from AirNow API. Requires AIRNOW_KEY env var (free at airnowapi.org)."""
+    if not AIRNOW_KEY:
+        return {"type": "FeatureCollection", "features": []}
+    print("Downloading AirNow AQI data...")
+    try:
+        now = datetime.datetime.utcnow()
+        date_str = now.strftime("%Y-%m-%dT%H")
+        url = (
+            f"https://www.airnowapi.org/aq/data/"
+            f"?startDate={date_str}&endDate={date_str}"
+            f"&parameters=PM25,OZONE&BBOX=-125,24,-66,50"
+            f"&dataType=A&format=application/json&verbose=0&monitorType=2"
+            f"&API_KEY={AIRNOW_KEY}"
+        )
+        r = requests.get(url, timeout=20)
+        r.raise_for_status()
+        readings = r.json()
+        # Deduplicate by station — keep highest AQI reading per location
+        station_best = {}
+        for item in readings:
+            lat = item.get("Latitude")
+            lon = item.get("Longitude")
+            if not lat or not lon:
+                continue
+            key = (round(float(lat), 3), round(float(lon), 3))
+            aqi = item.get("AQI", 0) or 0
+            if key not in station_best or aqi > station_best[key].get("AQI", 0):
+                station_best[key] = item
+        features = []
+        for (lat, lon), item in station_best.items():
+            aqi = item.get("AQI", 0) or 0
+            cat = (item.get("Category") or {}).get("Name", "Unknown")
+            features.append({
+                "type": "Feature",
+                "geometry": {"type": "Point", "coordinates": [lon, lat]},
+                "properties": {
+                    "aqi":            aqi,
+                    "category":       cat,
+                    "parameter":      item.get("ParameterName", ""),
+                    "reporting_area": item.get("ReportingArea", ""),
+                    "state":          item.get("StateCode", ""),
+                }
+            })
+        print(f"  AirNow: {len(features)} monitoring stations")
+        return {"type": "FeatureCollection", "features": features}
+    except Exception as e:
+        print(f"  AirNow failed: {e}")
+        return {"type": "FeatureCollection", "features": []}
+
+def fetch_fema_disasters():
+    """Fetch active FEMA disaster declarations from the last 60 days."""
+    print("Downloading FEMA disaster declarations...")
+    try:
+        cutoff = (datetime.datetime.utcnow() - datetime.timedelta(days=60)).strftime("%Y-%m-%dT00:00:00.000Z")
+        url = (
+            "https://www.fema.gov/api/open/v2/DisasterDeclarationsSummaries"
+            f"?$filter=declarationDate ge '{cutoff}'"
+            "&$format=json&$orderby=declarationDate desc&$top=300"
+            "&$select=disasterNumber,state,declarationDate,disasterType,declarationTitle,designatedArea"
+        )
+        r = requests.get(url, timeout=20)
+        r.raise_for_status()
+        data = r.json()
+        records = data.get("DisasterDeclarationsSummaries", [])
+        # Aggregate by state — count disasters and collect titles
+        by_state = {}
+        for rec in records:
+            st = rec.get("state", "")
+            if not st or st not in STATE_CENTROIDS:
+                continue
+            if st not in by_state:
+                by_state[st] = {"count": 0, "types": set(), "latest": ""}
+            by_state[st]["count"] += 1
+            dtype = rec.get("disasterType", "")
+            if dtype:
+                by_state[st]["types"].add(dtype)
+            if not by_state[st]["latest"]:
+                by_state[st]["latest"] = rec.get("declarationTitle", "")
+        features = []
+        for st, info in by_state.items():
+            lat, lon = STATE_CENTROIDS[st]
+            features.append({
+                "type": "Feature",
+                "geometry": {"type": "Point", "coordinates": [lon, lat]},
+                "properties": {
+                    "state":   st,
+                    "count":   info["count"],
+                    "types":   ", ".join(sorted(info["types"])),
+                    "latest":  info["latest"],
+                }
+            })
+        print(f"  FEMA: {len(records)} declarations across {len(features)} states")
+        return {"type": "FeatureCollection", "features": features}
+    except Exception as e:
+        print(f"  FEMA disasters failed: {e}")
+        return {"type": "FeatureCollection", "features": []}
+
+def fetch_river_gauges():
+    """Fetch USGS river gauges currently at or above flood stage."""
+    print("Downloading USGS river flood stages...")
+    try:
+        r = requests.get(
+            "https://waterwatch.usgs.gov/webservices/floodstage?format=json",
+            timeout=20
+        )
+        r.raise_for_status()
+        data = r.json()
+        sites = data.get("sites", [])
+        features = []
+        for site in sites:
+            try:
+                lat = float(site.get("lat", 0))
+                lon = float(site.get("lon", 0))
+                if not lat or not lon:
+                    continue
+                flood_cat = site.get("flood_stage_cat", "").strip()
+                # Map flood category to color-coded severity
+                color_map = {
+                    "action":   "#FFFF00",
+                    "minor":    "#FFA500",
+                    "moderate": "#FF4500",
+                    "major":    "#FF0000",
+                }
+                color = color_map.get(flood_cat.lower(), "#AAAAFF")
+                features.append({
+                    "type": "Feature",
+                    "geometry": {"type": "Point", "coordinates": [lon, lat]},
+                    "properties": {
+                        "site_no":    site.get("site_no", ""),
+                        "name":       site.get("station_nm", "Unknown Gauge"),
+                        "stage":      site.get("stage", "N/A"),
+                        "flood_stage":site.get("flood_stage", "N/A"),
+                        "category":   flood_cat,
+                        "color":      color,
+                    }
+                })
+            except Exception:
+                continue
+        print(f"  USGS river gauges: {len(features)} at/above flood stage")
+        return {"type": "FeatureCollection", "features": features}
+    except Exception as e:
+        print(f"  River gauges failed: {e}")
+        return {"type": "FeatureCollection", "features": []}
+
+def fetch_volcanoes():
+    """Fetch USGS volcano alert levels for US volcanoes."""
+    print("Downloading USGS volcano alerts...")
+    try:
+        r = requests.get(
+            "https://volcanoes.usgs.gov/feeds/vsc_alert_levels.json",
+            timeout=20
+        )
+        r.raise_for_status()
+        data = r.json()
+        volcs = data if isinstance(data, list) else data.get("volcanoes", data.get("features", []))
+        features = []
+        alert_colors = {
+            "normal":    "#00FF88",
+            "advisory":  "#FFFF00",
+            "watch":     "#FF8800",
+            "warning":   "#FF0000",
+        }
+        for v in volcs:
+            try:
+                # Handle both list-of-dicts and GeoJSON feature formats
+                if v.get("type") == "Feature":
+                    props = v.get("properties", {})
+                    coords = v["geometry"]["coordinates"]
+                    lon, lat = coords[0], coords[1]
+                else:
+                    lat = float(v.get("latitude", v.get("lat", 0)))
+                    lon = float(v.get("longitude", v.get("lon", 0)))
+                    props = v
+                if not lat or not lon:
+                    continue
+                alert = str(props.get("alert_level", props.get("alertLevel", "normal"))).lower()
+                if alert == "normal":
+                    continue  # Skip normal-level volcanoes to reduce clutter
+                features.append({
+                    "type": "Feature",
+                    "geometry": {"type": "Point", "coordinates": [lon, lat]},
+                    "properties": {
+                        "name":  props.get("volcano_name", props.get("name", "Volcano")),
+                        "alert": alert,
+                        "color": alert_colors.get(alert, "#FFFF00"),
+                        "aviation_color": props.get("aviation_color", props.get("aviationColor", "")),
+                    }
+                })
+            except Exception:
+                continue
+        print(f"  Volcanoes: {len(features)} elevated alerts")
+        return {"type": "FeatureCollection", "features": features}
+    except Exception as e:
+        print(f"  Volcanoes failed: {e}")
+        return {"type": "FeatureCollection", "features": []}
+
+def fetch_drought():
+    """Fetch current US Drought Monitor polygons from NOAA/USDA."""
+    print("Downloading drought monitor data...")
+    try:
+        url = (
+            "https://droughtmonitor.unl.edu/arcgis/rest/services/PUBLIC/USDM_current"
+            "/MapServer/0/query?where=1%3D1&outFields=DM&geometryPrecision=2"
+            "&outSR=4326&resultRecordCount=5000&f=geojson"
+        )
+        r = requests.get(url, timeout=30)
+        r.raise_for_status()
+        data = r.json()
+        if "error" in data:
+            print(f"  Drought monitor ArcGIS error: {data['error']}")
+            return {"type": "FeatureCollection", "features": []}
+        features = data.get("features", [])
+        print(f"  Drought monitor: {len(features)} polygons")
+        return data
+    except Exception as e:
+        print(f"  Drought monitor failed: {e}")
+        return {"type": "FeatureCollection", "features": []}
+
+def fetch_shelters():
+    """Fetch FEMA National Shelter System open shelters."""
+    print("Downloading FEMA open shelters...")
+    try:
+        url = (
+            "https://gis.fema.gov/arcgis/rest/services/NSS/OpenShelters/MapServer/0/query"
+            "?where=1%3D1&outFields=SHELTER_NAME,ADDRESS,CITY,STATE,PET_FRIENDLY,CAPACITY"
+            "&geometryPrecision=3&outSR=4326&resultRecordCount=2000&f=geojson"
+        )
+        r = requests.get(url, timeout=20)
+        r.raise_for_status()
+        data = r.json()
+        if "error" in data:
+            print(f"  Shelters ArcGIS error: {data['error']}")
+            return {"type": "FeatureCollection", "features": []}
+        features = data.get("features", [])
+        print(f"  Open shelters: {len(features)}")
+        return data
+    except Exception as e:
+        print(f"  Shelters failed: {e}")
+        return {"type": "FeatureCollection", "features": []}
 
 def schedule_updates(interval_minutes=30):
     """Run update on schedule in background thread."""
@@ -1262,6 +1552,60 @@ def api_fire_perimeters():
     """Returns active wildfire perimeters as GeoJSON."""
     return flask_module.Response(
         json.dumps(state.get("fire_perimeters", {"type":"FeatureCollection","features":[]})),
+        mimetype="application/json",
+        headers={"Access-Control-Allow-Origin": "*"}
+    )
+
+@app.server.route("/api/air_quality")
+def api_air_quality():
+    """Returns current AQI monitoring station readings as GeoJSON."""
+    return flask_module.Response(
+        json.dumps(state.get("air_quality", {"type":"FeatureCollection","features":[]})),
+        mimetype="application/json",
+        headers={"Access-Control-Allow-Origin": "*"}
+    )
+
+@app.server.route("/api/fema_disasters")
+def api_fema_disasters():
+    """Returns active FEMA disaster declarations as GeoJSON state-level points."""
+    return flask_module.Response(
+        json.dumps(state.get("fema_disasters", {"type":"FeatureCollection","features":[]})),
+        mimetype="application/json",
+        headers={"Access-Control-Allow-Origin": "*"}
+    )
+
+@app.server.route("/api/river_gauges")
+def api_river_gauges():
+    """Returns USGS river gauges at or above flood stage as GeoJSON."""
+    return flask_module.Response(
+        json.dumps(state.get("river_gauges", {"type":"FeatureCollection","features":[]})),
+        mimetype="application/json",
+        headers={"Access-Control-Allow-Origin": "*"}
+    )
+
+@app.server.route("/api/volcanoes")
+def api_volcanoes():
+    """Returns USGS volcano alert levels as GeoJSON."""
+    return flask_module.Response(
+        json.dumps(state.get("volcanoes", {"type":"FeatureCollection","features":[]})),
+        mimetype="application/json",
+        headers={"Access-Control-Allow-Origin": "*"}
+    )
+
+@app.server.route("/api/drought")
+def api_drought():
+    """Returns current US Drought Monitor polygons as GeoJSON."""
+    return flask_module.Response(
+        json.dumps(state.get("drought", {"type":"FeatureCollection","features":[]})),
+        mimetype="application/json",
+        headers={"Access-Control-Allow-Origin": "*"}
+    )
+
+@app.server.route("/api/shelters")
+def api_shelters():
+    """Returns FEMA open emergency shelters as GeoJSON."""
+    return flask_module.Response(
+        json.dumps(state.get("shelters", {"type":"FeatureCollection","features":[]})),
         mimetype="application/json",
         headers={"Access-Control-Allow-Origin": "*"}
     )
@@ -2218,6 +2562,159 @@ function setupLayers() {{
         _stormFrame++;
     }}, 80);
 
+    // ── DROUGHT MONITOR ──────────────────────────────
+    map.addSource('drought', {{ type: 'geojson', data: '/api/drought' }});
+    map.addLayer({{
+        id: 'drought-fill', type: 'fill', source: 'drought',
+        layout: {{ visibility: 'none' }},
+        paint: {{
+            'fill-color': [
+                'step', ['get', 'DM'],
+                '#F5DEB3',  // D0 Abnormally Dry
+                1, '#FFD700',  // D1 Moderate
+                2, '#FF8C00',  // D2 Severe
+                3, '#FF2400',  // D3 Extreme
+                4, '#8B0000'   // D4 Exceptional
+            ],
+            'fill-opacity': 0.45
+        }}
+    }});
+    map.on('click', 'drought-fill', (e) => {{
+        const dm = e.features[0].properties.DM;
+        const labels = ['D0 Abnormally Dry','D1 Moderate Drought','D2 Severe Drought','D3 Extreme Drought','D4 Exceptional Drought'];
+        showPopup('🏜 Drought Conditions', {{ 'Severity': labels[dm] || 'D'+dm }}, e);
+    }});
+
+    // ── AIR QUALITY (AQI) ────────────────────────────
+    map.addSource('airquality', {{ type: 'geojson', data: '/api/air_quality' }});
+    map.addLayer({{
+        id: 'aqi-circles', type: 'circle', source: 'airquality',
+        layout: {{ visibility: 'visible' }},
+        paint: {{
+            'circle-color': [
+                'step', ['get', 'aqi'],
+                '#00E400',   // 0-50 Good
+                51,  '#FFFF00',  // 51-100 Moderate
+                101, '#FF7E00',  // 101-150 Unhealthy for Sensitive
+                151, '#FF0000',  // 151-200 Unhealthy
+                201, '#8F3F97',  // 201-300 Very Unhealthy
+                301, '#7E0023'   // 301+ Hazardous
+            ],
+            'circle-radius': 7,
+            'circle-opacity': 0.85,
+            'circle-stroke-color': 'rgba(0,0,0,0.4)',
+            'circle-stroke-width': 1
+        }}
+    }});
+    map.on('click', 'aqi-circles', (e) => {{
+        const p = e.features[0].properties;
+        showPopup('💨 Air Quality — ' + (p.reporting_area || p.state || ''), {{
+            'AQI':       p.aqi,
+            'Category':  p.category,
+            'Parameter': p.parameter,
+            'State':     p.state
+        }}, e);
+    }});
+    map.on('mouseenter', 'aqi-circles', () => map.getCanvas().style.cursor = 'pointer');
+    map.on('mouseleave', 'aqi-circles', () => map.getCanvas().style.cursor = '');
+
+    // ── RIVER FLOOD GAUGES ───────────────────────────
+    map.addSource('river_gauges', {{ type: 'geojson', data: '/api/river_gauges' }});
+    map.addLayer({{
+        id: 'river-gauges', type: 'circle', source: 'river_gauges',
+        layout: {{ visibility: 'visible' }},
+        paint: {{
+            'circle-color': ['get', 'color'],
+            'circle-radius': 7,
+            'circle-stroke-color': '#FFFFFF',
+            'circle-stroke-width': 1.5,
+            'circle-opacity': 0.9
+        }}
+    }});
+    map.on('click', 'river-gauges', (e) => {{
+        const p = e.features[0].properties;
+        showPopup('🌊 Flood Gauge — ' + (p.name || ''), {{
+            'Stage':       p.stage + ' ft',
+            'Flood Stage': p.flood_stage + ' ft',
+            'Category':    p.category,
+            'Site No.':    p.site_no
+        }}, e);
+    }});
+    map.on('mouseenter', 'river-gauges', () => map.getCanvas().style.cursor = 'pointer');
+    map.on('mouseleave', 'river-gauges', () => map.getCanvas().style.cursor = '');
+
+    // ── VOLCANOES ────────────────────────────────────
+    map.addSource('volcanoes', {{ type: 'geojson', data: '/api/volcanoes' }});
+    map.addLayer({{
+        id: 'volcano-circles', type: 'circle', source: 'volcanoes',
+        layout: {{ visibility: 'visible' }},
+        paint: {{
+            'circle-color': ['get', 'color'],
+            'circle-radius': 9,
+            'circle-stroke-color': '#FFFFFF',
+            'circle-stroke-width': 2,
+            'circle-opacity': 0.95
+        }}
+    }});
+    map.on('click', 'volcano-circles', (e) => {{
+        const p = e.features[0].properties;
+        showPopup('🌋 ' + (p.name || 'Volcano'), {{
+            'Alert Level':    p.alert.toUpperCase(),
+            'Aviation Color': p.aviation_color || 'N/A'
+        }}, e);
+    }});
+    map.on('mouseenter', 'volcano-circles', () => map.getCanvas().style.cursor = 'pointer');
+    map.on('mouseleave', 'volcano-circles', () => map.getCanvas().style.cursor = '');
+
+    // ── FEMA DISASTER DECLARATIONS ───────────────────
+    map.addSource('fema_disasters', {{ type: 'geojson', data: '/api/fema_disasters' }});
+    map.addLayer({{
+        id: 'fema-disasters', type: 'circle', source: 'fema_disasters',
+        layout: {{ visibility: 'none' }},
+        paint: {{
+            'circle-color': '#C084FC',
+            'circle-radius': ['interpolate', ['linear'], ['get', 'count'], 1, 8, 10, 18],
+            'circle-stroke-color': '#FFFFFF',
+            'circle-stroke-width': 1.5,
+            'circle-opacity': 0.8
+        }}
+    }});
+    map.on('click', 'fema-disasters', (e) => {{
+        const p = e.features[0].properties;
+        showPopup('🏛 FEMA Disasters — ' + p.state, {{
+            'Active Declarations': p.count,
+            'Types':   p.types || 'N/A',
+            'Latest':  p.latest || 'N/A'
+        }}, e);
+    }});
+    map.on('mouseenter', 'fema-disasters', () => map.getCanvas().style.cursor = 'pointer');
+    map.on('mouseleave', 'fema-disasters', () => map.getCanvas().style.cursor = '');
+
+    // ── EMERGENCY SHELTERS ───────────────────────────
+    map.addSource('shelters', {{ type: 'geojson', data: '/api/shelters' }});
+    map.addLayer({{
+        id: 'shelter-circles', type: 'circle', source: 'shelters',
+        layout: {{ visibility: 'visible' }},
+        paint: {{
+            'circle-color': '#00FF88',
+            'circle-radius': 7,
+            'circle-stroke-color': '#FFFFFF',
+            'circle-stroke-width': 1.5,
+            'circle-opacity': 0.9
+        }}
+    }});
+    map.on('click', 'shelter-circles', (e) => {{
+        const p = e.features[0].properties;
+        showPopup('🏠 Emergency Shelter', {{
+            'Name':    p.SHELTER_NAME || 'Open Shelter',
+            'Address': (p.ADDRESS || '') + (p.CITY ? ', ' + p.CITY : '') + (p.STATE ? ', ' + p.STATE : ''),
+            'Pet Friendly': p.PET_FRIENDLY === 'Yes' ? '✅ Yes' : '❌ No',
+            'Capacity': p.CAPACITY || 'N/A'
+        }}, e);
+    }});
+    map.on('mouseenter', 'shelter-circles', () => map.getCanvas().style.cursor = 'pointer');
+    map.on('mouseleave', 'shelter-circles', () => map.getCanvas().style.cursor = '');
+
     // ── COUNTY HOVER TOOLTIP ─────────────────────────
     const hoverTooltip = document.createElement('div');
     hoverTooltip.id = 'hover-tooltip';
@@ -2308,6 +2805,12 @@ function setupLayers() {{
     toggleContainer.appendChild(makeToggle('🏥 Hospitals', 'infra-normal', true));
     toggleContainer.appendChild(makeToggle('⚠ At-Risk Infra', 'infra-at-risk', true));
     toggleContainer.appendChild(makeToggle('🏷 Infra Labels', 'infra-labels', false));
+    toggleContainer.appendChild(makeToggle('💨 Air Quality', 'aqi-circles', true));
+    toggleContainer.appendChild(makeToggle('🌊 Flood Gauges', 'river-gauges', true));
+    toggleContainer.appendChild(makeToggle('🌋 Volcanoes', 'volcano-circles', true));
+    toggleContainer.appendChild(makeToggle('🏠 Shelters', 'shelter-circles', true));
+    toggleContainer.appendChild(makeToggle('🏜 Drought', 'drought-fill', false));
+    toggleContainer.appendChild(makeToggle('🏛 FEMA Disasters', 'fema-disasters', false));
     document.body.appendChild(toggleContainer);
 
 
@@ -2355,7 +2858,9 @@ function setupLayers() {{
             // Refresh all map sources with fresh data
             if (map.loaded()) {{
                 ['warnings','spc','earthquakes','fires','fires-heat','counties',
-                 'infrastructure','lightning','fire_perimeters','storms'].forEach(src => {{
+                 'infrastructure','lightning','fire_perimeters','storms',
+                 'airquality','fema_disasters','river_gauges','volcanoes','drought','shelters'
+                ].forEach(src => {{
                     if (map.getSource(src)) {{
                         map.getSource(src).setData('/api/' + src.replace('-heat','') + '?t=' + Date.now());
                     }}
