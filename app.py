@@ -1084,7 +1084,8 @@ def fetch_air_quality():
         features = []
         for (lat, lon), item in station_best.items():
             aqi = item.get("AQI", 0) or 0
-            cat = (item.get("Category") or {}).get("Name", "Unknown")
+            cat_raw = item.get("Category", {})
+            cat = cat_raw.get("Name", "Unknown") if isinstance(cat_raw, dict) else "Unknown"
             features.append({
                 "type": "Feature",
                 "geometry": {"type": "Point", "coordinates": [lon, lat]},
@@ -1107,13 +1108,17 @@ def fetch_fema_disasters():
     print("Downloading FEMA disaster declarations...")
     try:
         cutoff = (datetime.datetime.utcnow() - datetime.timedelta(days=60)).strftime("%Y-%m-%d")
-        url = (
-            "https://www.fema.gov/api/open/v2/DisasterDeclarationsSummaries"
-            f"?$filter=declarationDate ge {cutoff}"
-            "&$format=json&$orderby=declarationDate desc&$top=300"
-            "&$select=disasterNumber,state,declarationDate,disasterType,declarationTitle,designatedArea"
+        r = requests.get(
+            "https://www.fema.gov/api/open/v2/DisasterDeclarationsSummaries",
+            params={
+                "$filter": f"declarationDate ge '{cutoff}'",
+                "$format": "json",
+                "$orderby": "declarationDate desc",
+                "$top": "300",
+                "$select": "disasterNumber,state,declarationDate,disasterType,declarationTitle,designatedArea",
+            },
+            timeout=20
         )
-        r = requests.get(url, timeout=20)
         r.raise_for_status()
         data = r.json()
         records = data.get("DisasterDeclarationsSummaries", [])
