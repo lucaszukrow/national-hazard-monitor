@@ -1048,11 +1048,13 @@ def fetch_air_quality():
         return {"type": "FeatureCollection", "features": []}
     print("Downloading AirNow AQI data...")
     try:
-        now = datetime.datetime.utcnow()
-        date_str = now.strftime("%Y-%m-%dT%H")
+        now  = datetime.datetime.utcnow()
+        end  = now.strftime("%Y-%m-%dT%H")
+        # AirNow reports are 1-2 hours delayed — query a 3-hour window to guarantee data
+        start = (now - datetime.timedelta(hours=3)).strftime("%Y-%m-%dT%H")
         url = (
             f"https://www.airnowapi.org/aq/data/"
-            f"?startDate={date_str}&endDate={date_str}"
+            f"?startDate={start}&endDate={end}"
             f"&parameters=PM25,OZONE&BBOX=-125,24,-66,50"
             f"&dataType=A&format=application/json&verbose=0&monitorType=2"
             f"&API_KEY={AIRNOW_KEY}"
