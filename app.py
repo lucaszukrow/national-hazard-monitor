@@ -2018,28 +2018,53 @@ def mapbox_map():
     <div id="legend">
         <div>
             <div class="legend-title">NWS Warnings</div>
-            <div class="legend-item"><div class="legend-box" style="background:#FF0000;color:#FF0000"></div>Tornado</div>
-            <div class="legend-item"><div class="legend-box" style="background:#FF6600;color:#FF6600"></div>Hurricane</div>
-            <div class="legend-item"><div class="legend-box" style="background:#FF6666;color:#FF6666"></div>Svr T-Storm</div>
-            <div class="legend-item"><div class="legend-box" style="background:#00BFFF;color:#00BFFF"></div>Flash Flood</div>
+            <div class="legend-item"><div class="legend-box" style="background:#FF0000"></div>Tornado</div>
+            <div class="legend-item"><div class="legend-box" style="background:#FF6600"></div>Hurricane</div>
+            <div class="legend-item"><div class="legend-box" style="background:#FF6666"></div>Svr T-Storm</div>
+            <div class="legend-item"><div class="legend-box" style="background:#00BFFF"></div>Flash Flood</div>
+            <div class="legend-item"><div class="legend-box" style="background:#AAAAFF"></div>Winter Storm</div>
             <div class="legend-title">SPC Outlook</div>
-            <div class="legend-item"><div class="legend-box" style="background:#76FF7A;color:#76FF7A"></div>Thunder</div>
-            <div class="legend-item"><div class="legend-box" style="background:#FFFF00;color:#FFFF00"></div>Slight Risk</div>
-            <div class="legend-item"><div class="legend-box" style="background:#FF9900;color:#FF9900"></div>Enhanced</div>
-            <div class="legend-item"><div class="legend-box" style="background:#FF0000;color:#FF0000"></div>Moderate</div>
+            <div class="legend-item"><div class="legend-box" style="background:#76FF7A"></div>Thunder</div>
+            <div class="legend-item"><div class="legend-box" style="background:#FFFF00"></div>Slight Risk</div>
+            <div class="legend-item"><div class="legend-box" style="background:#FF9900"></div>Enhanced</div>
+            <div class="legend-item"><div class="legend-box" style="background:#FF0000"></div>Moderate/High</div>
+            <div class="legend-title">Earthquakes</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#FFFF00"></div>M2.5–3.9</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#FF9900"></div>M4.0–4.9</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#FF0000"></div>M5.0+</div>
         </div>
         <div>
-            <div class="legend-title">Earthquakes</div>
-            <div class="legend-item"><div class="legend-dot" style="background:#FFFF00;color:#FFFF00"></div>M2.5–3.9</div>
-            <div class="legend-item"><div class="legend-dot" style="background:#FF9900;color:#FF9900"></div>M4.0–4.9</div>
-            <div class="legend-item"><div class="legend-dot" style="background:#FF0000;color:#FF0000"></div>M5.0+</div>
             <div class="legend-title">Wildfires</div>
-            <div class="legend-item"><div class="legend-dot" style="background:#FF4500;color:#FF4500"></div>FIRMS Point</div>
-            <div class="legend-item"><div class="legend-box" style="background:rgba(255,69,0,0.5);color:#FF4500"></div>Perimeter</div>
-            <div class="legend-title">Infrastructure</div>
-            <div class="legend-item"><div class="legend-dot" style="background:#FF0066;color:#FF0066"></div>Hospital</div>
-            <div class="legend-item"><div class="legend-dot" style="background:#FFD700;color:#FFD700"></div>Power Plant</div>
-            <div class="legend-item"><div class="legend-dot" style="background:#FF0000;color:#FF0000"></div>⚠ At Risk</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#FF4500"></div>FIRMS Detection</div>
+            <div class="legend-item"><div class="legend-box" style="background:rgba(255,69,0,0.5);border:1px solid #FF4500"></div>Perimeter</div>
+            <div class="legend-title">Air Quality (AQI)</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#00E400"></div>Good (0–50)</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#FFFF00"></div>Moderate (51–100)</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#FF7E00"></div>Unhealthy/Sens (101–150)</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#FF0000"></div>Unhealthy (151–200)</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#8F3F97"></div>Very Unhealthy (201+)</div>
+            <div class="legend-title">Flood Gauges</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#FFFF00"></div>Action Stage</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#FFA500"></div>Minor Flood</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#FF4500"></div>Moderate Flood</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#FF0000"></div>Major Flood</div>
+        </div>
+        <div>
+            <div class="legend-title">Volcanoes</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#FFFF00"></div>Advisory</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#FF8800"></div>Watch</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#FF0000"></div>Warning</div>
+            <div class="legend-title">Drought Monitor</div>
+            <div class="legend-item"><div class="legend-box" style="background:#F5DEB3"></div>D0 Abnormally Dry</div>
+            <div class="legend-item"><div class="legend-box" style="background:#FFD700"></div>D1 Moderate</div>
+            <div class="legend-item"><div class="legend-box" style="background:#FF8C00"></div>D2 Severe</div>
+            <div class="legend-item"><div class="legend-box" style="background:#FF2400"></div>D3 Extreme</div>
+            <div class="legend-item"><div class="legend-box" style="background:#8B0000"></div>D4 Exceptional</div>
+            <div class="legend-title">Other</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#00FF88"></div>Open Shelter</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#C084FC"></div>FEMA Disaster</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#FF0066"></div>Hospital</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#FFD700"></div>Power Plant</div>
         </div>
     </div>
 </div>
@@ -2586,9 +2611,9 @@ function setupLayers() {{
     }});
 
     // ── AIR QUALITY (AQI) ────────────────────────────
-    map.addSource('airquality', {{ type: 'geojson', data: '/api/air_quality' }});
+    map.addSource('air_quality', {{ type: 'geojson', data: '/api/air_quality' }});
     map.addLayer({{
-        id: 'aqi-circles', type: 'circle', source: 'airquality',
+        id: 'aqi-circles', type: 'circle', source: 'air_quality',
         layout: {{ visibility: 'visible' }},
         paint: {{
             'circle-color': [
@@ -2859,7 +2884,7 @@ function setupLayers() {{
             if (map.loaded()) {{
                 ['warnings','spc','earthquakes','fires','fires-heat','counties',
                  'infrastructure','lightning','fire_perimeters','storms',
-                 'airquality','fema_disasters','river_gauges','volcanoes','drought','shelters'
+                 'air_quality','fema_disasters','river_gauges','volcanoes','drought','shelters'
                 ].forEach(src => {{
                     if (map.getSource(src)) {{
                         map.getSource(src).setData('/api/' + src.replace('-heat','') + '?t=' + Date.now());
