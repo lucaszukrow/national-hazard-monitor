@@ -1099,7 +1099,7 @@ def fetch_fema_disasters():
         cutoff = (datetime.datetime.utcnow() - datetime.timedelta(days=60)).strftime("%Y-%m-%dT00:00:00.000Z")
         url = (
             "https://www.fema.gov/api/open/v2/DisasterDeclarationsSummaries"
-            f"?$filter=declarationDate ge '{cutoff}'"
+            f"?$filter=declarationDate ge {cutoff}"
             "&$format=json&$orderby=declarationDate desc&$top=300"
             "&$select=disasterNumber,state,declarationDate,disasterType,declarationTitle,designatedArea"
         )
@@ -1141,119 +1141,119 @@ def fetch_fema_disasters():
         return {"type": "FeatureCollection", "features": []}
 
 def fetch_river_gauges():
-    """Fetch USGS river gauges currently at or above flood stage."""
-    print("Downloading USGS river flood stages...")
+    """Fetch NOAA AHPS river gauges currently at or above flood stage."""
+    print("Downloading NOAA river flood gauges...")
     try:
         r = requests.get(
-            "https://waterwatch.usgs.gov/webservices/floodstage?format=json",
+            "https://mapservices.weather.noaa.gov/eventdriven/rest/services/water/riv_gauges/MapServer/0/query",
+            params={
+                "where":  "status IN ('action','minor','moderate','major')",
+                "outFields": "gaugelid,status,location,state,url",
+                "f": "geojson",
+                "resultRecordCount": "2000",
+            },
             timeout=20
         )
         r.raise_for_status()
         data = r.json()
-        sites = data.get("sites", [])
+        color_map = {
+            "action":   "#FFFF00",
+            "minor":    "#FFA500",
+            "moderate": "#FF4500",
+            "major":    "#FF0000",
+        }
         features = []
-        for site in sites:
+        for feat in data.get("features", []):
             try:
-                lat = float(site.get("lat", 0))
-                lon = float(site.get("lon", 0))
-                if not lat or not lon:
-                    continue
-                flood_cat = site.get("flood_stage_cat", "").strip()
-                # Map flood category to color-coded severity
-                color_map = {
-                    "action":   "#FFFF00",
-                    "minor":    "#FFA500",
-                    "moderate": "#FF4500",
-                    "major":    "#FF0000",
-                }
-                color = color_map.get(flood_cat.lower(), "#AAAAFF")
-                features.append({
-                    "type": "Feature",
-                    "geometry": {"type": "Point", "coordinates": [lon, lat]},
-                    "properties": {
-                        "site_no":    site.get("site_no", ""),
-                        "name":       site.get("station_nm", "Unknown Gauge"),
-                        "stage":      site.get("stage", "N/A"),
-                        "flood_stage":site.get("flood_stage", "N/A"),
-                        "category":   flood_cat,
-                        "color":      color,
-                    }
-                })
+                props = feat.get("properties") or {}
+                status = str(props.get("status", "")).lower()
+                props["color"] = color_map.get(status, "#AAAAFF")
+                props["name"]  = props.get("location", "Unknown Gauge")
+                features.append(feat)
             except Exception:
                 continue
-        print(f"  USGS river gauges: {len(features)} at/above flood stage")
+        print(f"  River gauges: {len(features)} at/above flood/action stage")
         return {"type": "FeatureCollection", "features": features}
     except Exception as e:
         print(f"  River gauges failed: {e}")
         return {"type": "FeatureCollection", "features": []}
 
 def fetch_volcanoes():
-    """Fetch USGS volcano alert levels for US volcanoes."""
-    print("Downloading USGS volcano alerts...")
+    """Fetch elevated volcano alerts from GDACS (Orange/Red level globally)."""
+    print("Downloading GDACS volcano alerts...")
     try:
         r = requests.get(
-            "https://volcanoes.usgs.gov/feeds/vsc_alert_levels.json",
+            "https://www.gdacs.org/gdacsapi/api/events/geteventlist/MAP?eventlist=VO",
             timeout=20
         )
         r.raise_for_status()
         data = r.json()
-        volcs = data if isinstance(data, list) else data.get("volcanoes", data.get("features", []))
+        alert_colors = {"orange": "#FF8800", "red": "#FF0000"}
         features = []
-        alert_colors = {
-            "normal":    "#00FF88",
-            "advisory":  "#FFFF00",
-            "watch":     "#FF8800",
-            "warning":   "#FF0000",
-        }
-        for v in volcs:
+        for feat in data.get("features", []):
             try:
-                # Handle both list-of-dicts and GeoJSON feature formats
-                if v.get("type") == "Feature":
-                    props = v.get("properties", {})
-                    coords = v["geometry"]["coordinates"]
-                    lon, lat = coords[0], coords[1]
-                else:
-                    lat = float(v.get("latitude", v.get("lat", 0)))
-                    lon = float(v.get("longitude", v.get("lon", 0)))
-                    props = v
-                if not lat or not lon:
+                props = feat.get("properties") or {}
+                alert = str(props.get("alertlevel", "")).lower()
+                # Only show elevated (orange/red) current events to avoid clutter
+                if alert not in ("orange", "red"):
                     continue
-                alert = str(props.get("alert_level", props.get("alertLevel", "normal"))).lower()
-                if alert == "normal":
-                    continue  # Skip normal-level volcanoes to reduce clutter
+                if not props.get("iscurrent"):
+                    continue
+                geom = feat.get("geometry") or {}
+                coords = geom.get("coordinates")
+                if not coords:
+                    continue
+                # GDACS sometimes returns polygon geometry for uncertainty cones —
+                # use the first coordinate pair as the point location
+                if geom.get("type") == "Point":
+                    lon, lat = coords[0], coords[1]
+                elif geom.get("type") == "Polygon":
+                    # centroid approximation from first ring's first point
+                    ring = coords[0]
+                    lon = sum(p[0] for p in ring) / len(ring)
+                    lat = sum(p[1] for p in ring) / len(ring)
+                else:
+                    continue
+                name = props.get("eventname") or props.get("name") or "Volcano"
+                country = props.get("country", "")
                 features.append({
                     "type": "Feature",
                     "geometry": {"type": "Point", "coordinates": [lon, lat]},
                     "properties": {
-                        "name":  props.get("volcano_name", props.get("name", "Volcano")),
-                        "alert": alert,
-                        "color": alert_colors.get(alert, "#FFFF00"),
-                        "aviation_color": props.get("aviation_color", props.get("aviationColor", "")),
+                        "name":    name,
+                        "country": country,
+                        "alert":   alert,
+                        "color":   alert_colors.get(alert, "#FF8800"),
+                        "score":   props.get("alertscore", ""),
                     }
                 })
             except Exception:
                 continue
-        print(f"  Volcanoes: {len(features)} elevated alerts")
-        return {"type": "FeatureCollection", "features": features}
+        # Deduplicate by rounded coordinates (GDACS sends same event as multiple polygons)
+        seen = set()
+        unique = []
+        for feat in features:
+            coords = feat["geometry"]["coordinates"]
+            key = (round(coords[0], 1), round(coords[1], 1))
+            if key not in seen:
+                seen.add(key)
+                unique.append(feat)
+        print(f"  Volcanoes: {len(unique)} elevated (Orange/Red) active alerts")
+        return {"type": "FeatureCollection", "features": unique}
     except Exception as e:
         print(f"  Volcanoes failed: {e}")
         return {"type": "FeatureCollection", "features": []}
 
 def fetch_drought():
-    """Fetch current US Drought Monitor polygons from NOAA/USDA."""
+    """Fetch current US Drought Monitor polygons from UNL."""
     print("Downloading drought monitor data...")
     try:
-        url = (
-            "https://droughtmonitor.unl.edu/arcgis/rest/services/PUBLIC/USDM_current"
-            "/MapServer/0/query?where=1%3D1&outFields=DM&geometryPrecision=2"
-            "&outSR=4326&resultRecordCount=5000&f=geojson"
+        r = requests.get(
+            "https://droughtmonitor.unl.edu/data/json/usdm_current.json",
+            timeout=30
         )
-        r = requests.get(url, timeout=30)
         r.raise_for_status()
         data = r.json()
-        if "error" in data:
-            print(f"  Drought monitor ArcGIS error: {data['error']}")
-            return {"type": "FeatureCollection", "features": []}
         features = data.get("features", [])
         print(f"  Drought monitor: {len(features)} polygons")
         return data
@@ -2658,11 +2658,11 @@ function setupLayers() {{
     }});
     map.on('click', 'river-gauges', (e) => {{
         const p = e.features[0].properties;
-        showPopup('🌊 Flood Gauge — ' + (p.name || ''), {{
-            'Stage':       p.stage + ' ft',
-            'Flood Stage': p.flood_stage + ' ft',
-            'Category':    p.category,
-            'Site No.':    p.site_no
+        showPopup('🌊 Flood Gauge — ' + (p.location || p.name || ''), {{
+            'Status':   (p.status || '').toUpperCase(),
+            'Location': p.location || 'N/A',
+            'State':    p.state || 'N/A',
+            'Details':  p.url ? '<a href="' + p.url + '" target="_blank" style="color:#00B4FF">NOAA Gauge Page</a>' : 'N/A'
         }}, e);
     }});
     map.on('mouseenter', 'river-gauges', () => map.getCanvas().style.cursor = 'pointer');
@@ -2684,8 +2684,9 @@ function setupLayers() {{
     map.on('click', 'volcano-circles', (e) => {{
         const p = e.features[0].properties;
         showPopup('🌋 ' + (p.name || 'Volcano'), {{
-            'Alert Level':    p.alert.toUpperCase(),
-            'Aviation Color': p.aviation_color || 'N/A'
+            'Alert Level': (p.alert || '').toUpperCase(),
+            'Country':     p.country || 'N/A',
+            'Source':      'GDACS'
         }}, e);
     }});
     map.on('mouseenter', 'volcano-circles', () => map.getCanvas().style.cursor = 'pointer');
