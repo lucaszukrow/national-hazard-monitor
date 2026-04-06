@@ -953,6 +953,9 @@ def run_update():
                     "earthquakes":      len(earthquakes.get("features", [])),
                     "active_storms":    len(storms),
                     "wildfires":        len(fires),
+                    "river_gauges":     len(state.get("river_gauges", {}).get("features", [])),
+                    "volcanoes":        len(state.get("volcanoes", {}).get("features", [])),
+                    "drought":          len(state.get("drought", {}).get("features", [])),
                     "affected_counties": affected
                 }
             })
@@ -1634,6 +1637,12 @@ def serve_nri_counties():
         mimetype='application/json'
     )
 
+@app.server.route("/api/sitrep")
+def api_sitrep():
+    """Generate an AI situation report via Groq. Returns JSON {text, raw}."""
+    text, raw = generate_sitrep()
+    return flask_module.jsonify({"text": text, "raw": raw or ""})
+
 @app.server.route("/mapbox")
 def mapbox_map():
     """Serves the full Mapbox GL JS map page."""
@@ -1648,6 +1657,7 @@ def mapbox_map():
     <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
     <link href="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
     <style>
         * {{ margin: 0; padding: 0; box-sizing: border-box; }}
         body {{ background: #000; font-family: 'Inter', Arial, sans-serif; color: white; overflow: hidden; }}
@@ -1686,6 +1696,72 @@ def mapbox_map():
             margin: 0;
         }}
         #header p {{ font-size: 10px; color: rgba(100,180,255,0.6); margin: 4px 0 0 0; letter-spacing: 1px; }}
+        #sitrep-btn {{
+            margin-top: 6px; padding: 4px 12px; font-size: 9px; font-weight: 600;
+            letter-spacing: 1.5px; text-transform: uppercase;
+            background: rgba(0,180,255,0.12); border: 1px solid rgba(0,180,255,0.35);
+            border-radius: 6px; color: rgba(0,200,255,0.9); cursor: pointer;
+            font-family: 'Inter', Arial, sans-serif; transition: background 0.2s, border-color 0.2s;
+        }}
+        #sitrep-btn:hover {{ background: rgba(0,180,255,0.22); border-color: rgba(0,180,255,0.6); }}
+
+        /* ── SITREP MODAL ── */
+        #sitrep-overlay {{
+            display: none; position: fixed; inset: 0; z-index: 50;
+            background: rgba(0,0,0,0.7); backdrop-filter: blur(4px);
+            align-items: center; justify-content: center;
+        }}
+        #sitrep-overlay.open {{ display: flex; }}
+        #sitrep-modal {{
+            background: linear-gradient(135deg, rgba(0,10,28,0.98) 0%, rgba(0,20,45,0.98) 100%);
+            border: 1px solid rgba(0,180,255,0.3); border-radius: 14px;
+            padding: 24px; width: min(600px, 92vw); max-height: 80vh;
+            overflow-y: auto; box-shadow: 0 0 60px rgba(0,180,255,0.15);
+            position: relative;
+        }}
+        #sitrep-modal h3 {{
+            font-size: 11px; letter-spacing: 2px; text-transform: uppercase;
+            color: rgba(0,200,255,0.8); margin-bottom: 14px;
+            border-bottom: 1px solid rgba(0,180,255,0.2); padding-bottom: 10px;
+        }}
+        #sitrep-body {{ font-size: 13px; line-height: 1.7; color: rgba(255,255,255,0.85); }}
+        #sitrep-body p {{ margin-bottom: 12px; }}
+        #sitrep-close {{
+            position: absolute; top: 14px; right: 16px;
+            background: transparent; border: none; color: rgba(255,255,255,0.4);
+            font-size: 18px; cursor: pointer; line-height: 1;
+        }}
+        #sitrep-close:hover {{ color: white; }}
+        #sitrep-footer {{
+            display: flex; gap: 10px; margin-top: 14px;
+            border-top: 1px solid rgba(255,255,255,0.07); padding-top: 12px;
+        }}
+        .sitrep-action-btn {{
+            padding: 6px 14px; font-size: 10px; font-weight: 600; letter-spacing: 1px;
+            text-transform: uppercase; border-radius: 6px; cursor: pointer;
+            font-family: 'Inter', Arial, sans-serif; border: 1px solid rgba(0,180,255,0.3);
+            background: rgba(0,180,255,0.1); color: rgba(0,200,255,0.8);
+            transition: background 0.2s;
+        }}
+        .sitrep-action-btn:hover {{ background: rgba(0,180,255,0.2); }}
+        #sitrep-copy-feedback {{ font-size: 10px; color: #00FF88; align-self: center; }}
+
+        /* ── DATA PANEL (Charts) ── */
+        #data-panel {{
+            position: absolute; top: 96px; left: 248px; z-index: 10;
+            background: linear-gradient(135deg, rgba(0,8,20,0.92) 0%, rgba(0,15,35,0.92) 100%);
+            border: 1px solid rgba(255,255,255,0.07); border-radius: 10px;
+            padding: 10px 12px; width: 210px;
+            backdrop-filter: blur(20px); box-shadow: 0 4px 24px rgba(0,0,0,0.4);
+        }}
+        #data-panel-header {{
+            font-size: 9px; color: rgba(0,180,255,0.8); font-weight: 600;
+            letter-spacing: 2px; text-transform: uppercase;
+            margin-bottom: 8px; padding-bottom: 5px;
+            border-bottom: 1px solid rgba(0,180,255,0.2);
+            cursor: pointer; user-select: none;
+        }}
+        #data-panel-body {{ transition: opacity 0.2s; }}
 
         /* ── LIVE INDICATOR ── */
         #live-dot {{
@@ -1988,6 +2064,28 @@ def mapbox_map():
 <div id="header">
     <h1><span id="live-dot"></span>National All-Hazards Monitor</h1>
     <p id="update-time">ACQUIRING LIVE DATA...</p>
+    <button id="sitrep-btn" onclick="openSitrep()">⚡ AI SITUATION REPORT</button>
+</div>
+
+<!-- Sitrep Modal -->
+<div id="sitrep-overlay" onclick="if(event.target===this)closeSitrep()">
+    <div id="sitrep-modal">
+        <button id="sitrep-close" onclick="closeSitrep()">✕</button>
+        <h3>⚡ AI Situation Report</h3>
+        <div id="sitrep-body"><p style="color:rgba(255,255,255,0.4)">Generating report...</p></div>
+        <div id="sitrep-footer">
+            <button class="sitrep-action-btn" onclick="copySitrep()">📋 Copy to Clipboard</button>
+            <span id="sitrep-copy-feedback"></span>
+        </div>
+    </div>
+</div>
+
+<!-- Data Panel -->
+<div id="data-panel">
+    <div id="data-panel-header" onclick="toggleDataPanel()">HAZARD OVERVIEW ▾</div>
+    <div id="data-panel-body">
+        <canvas id="hazard-chart" height="130"></canvas>
+    </div>
 </div>
 
 <!-- Stat Cards -->
@@ -2801,6 +2899,10 @@ function setupLayers() {{
         backdrop-filter: blur(20px);
         box-shadow: 0 4px 24px rgba(0,0,0,0.4);
         min-width: 170px;
+        max-height: calc(100vh - 280px);
+        overflow-y: auto;
+        scrollbar-width: thin;
+        scrollbar-color: rgba(0,180,255,0.3) transparent;
     `;
     const toggleHeader = document.createElement('div');
     toggleHeader.textContent = 'LAYERS';
@@ -2827,19 +2929,21 @@ function setupLayers() {{
         btn.onmouseenter = () => {{ btn.style.background = 'rgba(255,255,255,0.05)'; }};
         btn.onmouseleave = () => {{ btn.style.background = 'transparent'; }};
         let on = defaultOn;
+        const ids = Array.isArray(layerId) ? layerId : [layerId];
         btn.onclick = () => {{
             on = !on;
-            map.setLayoutProperty(layerId, 'visibility', on ? 'visible' : 'none');
+            ids.forEach(id => map.setLayoutProperty(id, 'visibility', on ? 'visible' : 'none'));
             btn.textContent = (on ? '🟢' : '⚫') + ' ' + label;
             btn.style.color = on ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.4)';
         }};
         return btn;
     }}
 
+    toggleContainer.appendChild(makeToggle('🔥 Fire Detections', ['fire-clusters','fire-cluster-count','fire-points'], true));
+    toggleContainer.appendChild(makeToggle('🔥 Fire Heatmap', 'fire-heat', true));
     toggleContainer.appendChild(makeToggle('🔥 Fire Perimeters', 'fire-perimeter-fill', true));
     toggleContainer.appendChild(makeToggle('⚡ Storm Reports', 'lightning-strikes', true));
     toggleContainer.appendChild(makeToggle('🌀 Hurricanes', 'storm-track', true));
-    toggleContainer.appendChild(makeToggle('🔥 Fire Heatmap', 'fire-heat', true));
     toggleContainer.appendChild(makeToggle('NEXRAD Radar', 'nexrad-layer', true));
     toggleContainer.appendChild(makeToggle('GOES Infrared', 'goes-ir-layer', false));
     toggleContainer.appendChild(makeToggle('Affected Counties', 'counties-fill', true));
@@ -2895,6 +2999,8 @@ function setupLayers() {{
             }} else {{
                 document.getElementById('update-time').textContent = 'ACQUIRING LIVE DATA...';
             }}
+
+            updateHazardChart(s);
 
             // Refresh all map sources with fresh data
             if (map.loaded()) {{
@@ -2996,6 +3102,87 @@ function setupLayers() {{
 map.on('load', function() {{
     setupLayers();
 }});
+
+// ── SITREP ────────────────────────────────────────
+let _sitrepRaw = '';
+function openSitrep() {{
+    const overlay = document.getElementById('sitrep-overlay');
+    const body = document.getElementById('sitrep-body');
+    overlay.classList.add('open');
+    body.innerHTML = '<p style="color:rgba(0,200,255,0.5);font-size:12px;">⚡ Generating situation report...</p>';
+    _sitrepRaw = '';
+    fetch('/api/sitrep')
+        .then(r => r.json())
+        .then(data => {{
+            _sitrepRaw = data.raw || data.text || '';
+            const paragraphs = (data.text || '').split(/\n\n+/).filter(p => p.trim());
+            body.innerHTML = paragraphs.map(p => `<p>${{p.trim()}}</p>`).join('');
+        }})
+        .catch(() => {{
+            body.innerHTML = '<p style="color:rgba(255,100,100,0.8)">Failed to generate report. Check GROQ_API_KEY.</p>';
+        }});
+}}
+function closeSitrep() {{
+    document.getElementById('sitrep-overlay').classList.remove('open');
+}}
+function copySitrep() {{
+    if (!_sitrepRaw) return;
+    navigator.clipboard.writeText(_sitrepRaw).then(() => {{
+        const fb = document.getElementById('sitrep-copy-feedback');
+        fb.textContent = '✓ Copied';
+        setTimeout(() => {{ fb.textContent = ''; }}, 2000);
+    }});
+}}
+
+// ── HAZARD OVERVIEW CHART ─────────────────────────
+let _hazardChart = null;
+function toggleDataPanel() {{
+    const body = document.getElementById('data-panel-body');
+    const hdr = document.getElementById('data-panel-header');
+    const hidden = body.style.display === 'none';
+    body.style.display = hidden ? '' : 'none';
+    hdr.textContent = 'HAZARD OVERVIEW ' + (hidden ? '▾' : '▸');
+}}
+function initHazardChart() {{
+    const ctx = document.getElementById('hazard-chart').getContext('2d');
+    _hazardChart = new Chart(ctx, {{
+        type: 'bar',
+        data: {{
+            labels: ['Warnings','Quakes','Fires','Gauges','Volcanoes','Drought'],
+            datasets: [{{
+                data: [0, 0, 0, 0, 0, 0],
+                backgroundColor: [
+                    'rgba(255,80,80,0.7)', 'rgba(0,180,255,0.7)', 'rgba(255,80,0,0.7)',
+                    'rgba(0,200,255,0.7)', 'rgba(255,136,0,0.7)', 'rgba(180,120,60,0.7)'
+                ],
+                borderRadius: 4, borderWidth: 0,
+            }}]
+        }},
+        options: {{
+            responsive: true, maintainAspectRatio: false,
+            plugins: {{ legend: {{ display: false }} }},
+            scales: {{
+                x: {{ ticks: {{ color: 'rgba(255,255,255,0.45)', font: {{ size: 8 }} }}, grid: {{ display: false }} }},
+                y: {{ ticks: {{ color: 'rgba(255,255,255,0.45)', font: {{ size: 8 }}, maxTicksLimit: 4 }},
+                      grid: {{ color: 'rgba(255,255,255,0.05)' }} }}
+            }}
+        }}
+    }});
+}}
+function updateHazardChart(summary) {{
+    if (!_hazardChart) return;
+    const s = summary || {{}};
+    _hazardChart.data.datasets[0].data = [
+        s.warnings_count || 0,
+        s.earthquakes    || 0,
+        s.wildfires      || 0,
+        s.river_gauges   || 0,
+        s.volcanoes      || 0,
+        s.drought        || 0,
+    ];
+    _hazardChart.update('none');
+}}
+initHazardChart();
 
 // ── ADDRESS SEARCH & THREAT ANALYSIS ─────────────
 const MAPBOX_TOKEN_JS = mapboxgl.accessToken;
