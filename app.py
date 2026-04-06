@@ -1071,6 +1071,8 @@ def fetch_air_quality():
         # Deduplicate by station — keep highest AQI reading per location
         station_best = {}
         for item in readings:
+            if not isinstance(item, dict):
+                continue
             lat = item.get("Latitude")
             lon = item.get("Longitude")
             if not lat or not lon:
@@ -1104,7 +1106,7 @@ def fetch_fema_disasters():
     """Fetch active FEMA disaster declarations from the last 60 days."""
     print("Downloading FEMA disaster declarations...")
     try:
-        cutoff = (datetime.datetime.utcnow() - datetime.timedelta(days=60)).strftime("%Y-%m-%dT00:00:00.000Z")
+        cutoff = (datetime.datetime.utcnow() - datetime.timedelta(days=60)).strftime("%Y-%m-%d")
         url = (
             "https://www.fema.gov/api/open/v2/DisasterDeclarationsSummaries"
             f"?$filter=declarationDate ge {cutoff}"
