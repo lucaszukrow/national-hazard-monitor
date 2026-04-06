@@ -16,14 +16,26 @@ On Render.com, the server is started via the Procfile:
 gunicorn app:server --worker-class gevent --workers 1 --timeout 120
 ```
 
-Required environment variables:
+### Environment Variables
+
+Required:
 - `FIRMS_KEY` — NASA FIRMS API key for wildfire data
 - `MAPBOX_TOKEN` — Mapbox GL JS access token
 - `PORT` — set automatically by Render
 
+Optional (features degrade silently if missing):
+- `AIRNOW_KEY` — EPA AirNow API key for air quality layer (free at airnowapi.org)
+- `SENDGRID_API_KEY` — SendGrid key for email alerts
+- `ALERT_EMAIL` — destination address for alert emails
+- `GROQ_API_KEY` — Groq key for AI situation reports (llama-3.3-70b-versatile)
+
+Missing required keys are logged as warnings at startup. Missing optional keys silently disable the relevant feature.
+
+---
+
 ## Architecture
 
-Everything lives in a single file: `app.py` (~2700 lines). There are no modules, no tests, no build step.
+Everything lives in a single file: `app.py` (~4100 lines). There are no modules, no tests, no build step.
 
 ### Two map views
 
@@ -38,29 +50,72 @@ The Mapbox page is a large f-string returned by the `mapbox_map()` Flask route. 
 
 1. **Background thread** (`schedule_updates`, every 30 min) calls all `fetch_*` functions and stores results in the global `state` dict.
 2. **Cache** (`/tmp/hazard_cache.json`) is written after each update and loaded at startup, so the app serves data immediately on first request.
-3. **Flask API endpoints** (`/api/warnings`, `/api/spc`, `/api/earthquakes`, `/api/fires`, `/api/fire_perimeters`, `/api/lightning`, `/api/storms`, `/api/counties`, `/api/infrastructure`, `/api/summary`) read directly from `state` and return GeoJSON or JSON.
+3. **Flask API endpoints** read directly from `state` and return GeoJSON or JSON.
 4. **Mapbox JS** in the browser calls these endpoints to populate map layers. `loadData()` (called every 5 min) refreshes all sources via `setData()`.
 5. **Dash callback** (`update_ui`) fires on a `dcc.Interval` and re-renders the Folium map, charts, and table from `state`.
+
+### Flask API endpoints
+
+| Endpoint | Source | Returns |
+|----------|--------|---------|
+| `/api/warnings` | NWS | Active watches/warnings/advisories (GeoJSON) |
+| `/api/spc` | NOAA SPC | Convective outlook zones (GeoJSON) |
+| `/api/earthquakes` | USGS | M2.5+ earthquakes past 24h (GeoJSON) |
+| `/api/fires` | NASA FIRMS | Satellite fire detections (GeoJSON points) |
+| `/api/fire_perimeters` | NIFC/ArcGIS | Active fire perimeter polygons (GeoJSON) |
+| `/api/lightning` | Iowa State Mesonet | Storm reports past 6h (GeoJSON) |
+| `/api/storms` | NHC | Hurricane cones and track points (GeoJSON) |
+| `/api/counties` | Plotly/Census | Affected county polygons with population (GeoJSON) |
+| `/api/infrastructure` | OpenStreetMap Overpass | Hospitals, fire stations, power plants, schools near warnings (GeoJSON) |
+| `/api/summary` | state dict | Hazard counts and last update time (JSON) |
+| `/api/air_quality` | EPA AirNow | AQI monitoring station readings (GeoJSON) |
+| `/api/fema_disasters` | FEMA OpenFEMA | Active disaster declarations last 60 days, state-level (GeoJSON) |
+| `/api/river_gauges` | USGS WaterWatch | River gauges at/above flood stage (GeoJSON) |
+| `/api/volcanoes` | USGS VHP | Volcano alert levels advisory and above (GeoJSON) |
+| `/api/drought` | NOAA/USDA Drought Monitor | Drought severity polygons D0–D4 (GeoJSON) |
+| `/api/shelters` | FEMA NSS | Open emergency shelters (GeoJSON) |
 
 ### Key globals
 
 - `state` — shared dict between the update thread and all request handlers. Contains raw GeoJSON for each data source, the rendered Folium map HTML, and the summary stats.
+- `state_lock` — `threading.RLock()` that must wrap all multi-key writes to `state` and the infrastructure cache reads/writes. Single-key reads are GIL-safe and do not need the lock.
 - `_started` / `_started_lock` — guards the background thread so it only starts once.
-- `FIRMS_KEY`, `MAPBOX_TOKEN` — read from env at module load.
+- `STATE_CENTROIDS` — dict of state abbreviation → [lat, lon] used to plot FEMA disaster declarations.
+
+### Thread safety
+
+`state_lock = threading.RLock()` protects against race conditions between the background update thread and Flask request handlers. Rules:
+- **Always lock** `state.update({...})` calls in `run_update()`.
+- **Always lock** reads and writes to `state["infra_cache_key"]` and `state["infra_features"]` in `api_infrastructure`.
+- **Single-key reads** (`state["warnings"]`) in API endpoints are GIL-safe — no lock needed.
 
 ### Static assets
 
 - `static/nri_counties.json` — pre-built FEMA National Risk Index lookup table (county → risk scores). Served at `/static/nri_counties.json` and loaded client-side for the Location Threat Analysis panel. **Do not regenerate this file lightly** — it is 1.3 MB.
 - `nri_counties.json` at repo root is the source file used to build the static copy.
 
+### Threat scoring (Location Threat Analysis)
+
+The search panel computes two independent scores shown together:
+
+1. **Real-time threat score (0–100)** — computed client-side in `runSearch()` using `THREAT_WEIGHTS` constants and a distance-decay function. Responds to currently active hazards within the search radius. This is the primary score.
+2. **FEMA NRI panel** — loaded from `static/nri_counties.json`. Shows long-term baseline risk (expected annual loss) for the searched county. This is static/historical context — it does NOT update based on active threats. Updated by FEMA annually.
+
+Keep both. They answer different questions: "what's happening right now" vs "what's this area's historical risk profile."
+
 ### Infrastructure API note
 
-`/api/infrastructure` calls the Overpass API (OpenStreetMap) at request time. It has an in-memory cache keyed by the bounding box of current warnings. This endpoint can be slow (~15s) on the first call after warnings change.
+`/api/infrastructure` calls the Overpass API (OpenStreetMap) at request time. It has an in-memory cache keyed by the bounding box of current warnings. This endpoint can be slow (up to 20s) on the first call after warnings change. Timeout is 20s.
+
+### Fire perimeter note
+
+The NIFC/ArcGIS endpoints return a mix of Polygon features (actual mapped perimeters) and Point features (incident location markers). Only `Polygon` and `MultiPolygon` geometry types are passed through to the API — Points are filtered out because they cannot render as fill layers and appear as invisible dots.
 
 ### Dependency notes
 
 - `gevent` monkey-patch must happen before all other imports (first lines of `app.py`) to fix SSL recursion issues with gunicorn gevent workers.
 - `folium` is only used for the Dash layout map, not the Mapbox page.
+- `groq` is pinned to `>=0.4.0,<2.0.0` — do not unpin.
 - No pandas usage despite it being in `requirements.txt`.
 
 ---
@@ -96,9 +151,24 @@ Before declaring a task complete:
 - Mentally trace the execution path end-to-end (data fetch → state → API → JS → UI)
 - Check that every new Dash component uses the correct namespace (`dcc.` vs `html.`)
 - Check that new f-string content escapes `{` and `}` as `{{` and `}}` inside Mapbox page strings
-- Confirm all new env vars are documented in `.env.example`
+- Confirm all new env vars are documented in this file and `.env.example`
+- Run `python3 -c "import ast; ast.parse(open('app.py').read()); print('OK')"` to catch syntax errors before committing
 
-### 5. Demand Elegance
+### 5. Adding a New Data Source
+
+Pattern for every new data source (all must degrade silently if the API is down):
+
+1. Write `fetch_X()` — returns GeoJSON FeatureCollection, prints count, catches all exceptions
+2. Add `"X": {"type": "FeatureCollection", "features": []}` to `state` dict initializer
+3. Call `fetch_X()` in `run_update()` and include in `state.update({...})` (inside `state_lock`)
+4. Include in `save_cache({...})` dict
+5. Add `@app.server.route("/api/X")` Flask endpoint
+6. Add Mapbox source + layer(s) in the f-string (remember `{{` `}}` escaping)
+7. Add source name to the `loadData()` refresh array
+8. Add toggle button via `makeToggle()`
+9. Document the endpoint in the API table above
+
+### 6. Demand Elegance
 
 Prefer the smallest change that achieves the goal:
 - CSS-only solutions over Python layout changes when possible
@@ -106,7 +176,7 @@ Prefer the smallest change that achieves the goal:
 - No new files, abstractions, or helpers unless clearly necessary
 - No backwards-compatibility shims — just change the code
 
-### 6. Autonomous Bug Fixing
+### 7. Autonomous Bug Fixing
 
 When a deploy or runtime error occurs:
 - Read the full error message and traceback before touching any code
