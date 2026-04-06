@@ -53,7 +53,7 @@ FIRMS_URL        = f"https://firms.modaps.eosdis.nasa.gov/api/area/csv/{FIRMS_KE
 SENDGRID_API_KEY  = os.environ.get("SENDGRID_API_KEY", "")
 ALERT_EMAIL       = os.environ.get("ALERT_EMAIL", "")
 GROQ_API_KEY  = os.environ.get("GROQ_API_KEY", "")
-AIRNOW_KEY    = os.environ.get("AIRNOW_KEY", "")   # Free key at airnowapi.org
+AIRNOW_KEY    = os.environ.get("AIRNOW_KEY", "").strip()   # Free key at airnowapi.org
 CENSUS_URL    = "https://www2.census.gov/programs-surveys/popest/datasets/2020-2023/counties/totals/co-est2023-alldata.csv"
 COUNTIES_URL  = "https://raw.githubusercontent.com/plotly/datasets/master/geojson-counties-fips.json"
 
@@ -1009,7 +1009,7 @@ def fetch_fire_perimeters():
     print("Downloading wildfire perimeters...")
     urls = [
         # NIFC WFIGS current-year interagency perimeters (primary — live REST endpoint)
-        "https://services3.arcgis.com/T4QMspbfLg3qTGWY/arcgis/rest/services/WFIGS_Interagency_Perimeters_YTD/FeatureServer/0/query?where=1%3D1&outFields=IncidentName,GISAcres,PercentContained,ModifiedOnDateTime_dt&geometryPrecision=3&outSR=4326&resultRecordCount=500&f=geojson",
+        "https://services3.arcgis.com/T4QMspbfLg3qTGWY/arcgis/rest/services/WFIGS_Interagency_Perimeters_YTD/FeatureServer/0/query?where=1%3D1&outFields=*&geometryPrecision=3&outSR=4326&resultRecordCount=500&f=geojson",
         # NIFC current fires (backup/supplemental)
         "https://services9.arcgis.com/RHVPKKiFTONKtxq3/arcgis/rest/services/USA_Wildfires_v1/FeatureServer/0/query?where=1%3D1&outFields=IncidentName,GISAcres,PercentContained&geometryPrecision=3&outSR=4326&resultRecordCount=300&f=geojson",
     ]
