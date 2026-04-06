@@ -57,6 +57,20 @@ CENSUS_URL   = "https://www2.census.gov/programs-surveys/popest/datasets/2020-20
 COUNTIES_URL = "https://raw.githubusercontent.com/plotly/datasets/master/geojson-counties-fips.json"
 
 # ─────────────────────────────────────────────
+# STARTUP VALIDATION — warn on missing required keys
+# ─────────────────────────────────────────────
+_missing_keys = []
+if not FIRMS_KEY:
+    _missing_keys.append("FIRMS_KEY (wildfire data will be unavailable)")
+if not os.environ.get("MAPBOX_TOKEN"):
+    _missing_keys.append("MAPBOX_TOKEN (/mapbox view will be broken)")
+if _missing_keys:
+    print("\n⚠  WARNING: Missing environment variables:")
+    for k in _missing_keys:
+        print(f"   • {k}")
+    print("   Set these in your .env file or Render dashboard.\n")
+
+# ─────────────────────────────────────────────
 # LOOKUP TABLES
 # ─────────────────────────────────────────────
 hazard_colors = {
@@ -153,11 +167,16 @@ state = {
     "seen_alert_ids": set()
 }
 
+# Protects state dict against concurrent reads/writes from the background thread
+# and Flask request handlers.
+state_lock = threading.RLock()
+
 # Load cache at module level — runs when gunicorn imports app
 # This ensures data is available immediately on startup
 _startup_cache = load_cache()
 if _startup_cache:
-    state.update(_startup_cache)
+    with state_lock:
+        state.update(_startup_cache)
     print(f"Startup: loaded cache from {_startup_cache.get('last_update', 'unknown')}")
 
 
@@ -664,6 +683,8 @@ def generate_sitrep():
                 }
             ]
         )
+        if not response.choices:
+            return "Error: No response returned by AI model.", None
         text = response.choices[0].message.content
         return text, text
     except Exception as e:
@@ -855,6 +876,7 @@ def run_update():
             print("Loading county boundaries...")
             try:
                 r = requests.get(COUNTIES_URL, timeout=30)
+                r.raise_for_status()
                 state["counties_geojson"] = r.json()
                 print(f"  Counties loaded: {len(state['counties_geojson'].get('features',[]))}")
             except Exception as e:
@@ -872,28 +894,30 @@ def run_update():
         # Send alerts for new high-priority events
         check_and_send_alerts(warnings, earthquakes, storms, affected)
 
-        # Update global state
-        state.update({
-            "last_update":  datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "warnings":     warnings,
-            "spc":          spc,
-            "earthquakes":  earthquakes,
-            "storms":       storms,
-            "fires":        fires,
-            "lightning":    lightning,
-            "fire_perimeters": fire_perimeters,
-            "map_html":     map_html,
-            "summary": {
-                "warnings_count":   len(warnings.get("features", [])),
-                "counties_count":   len(affected),
-                "total_population": total_pop,
-                "spc_zones":        len(spc.get("features", [])),
-                "earthquakes":      len(earthquakes.get("features", [])),
-                "active_storms":    len(storms),
-                "wildfires":        len(fires),
-                "affected_counties": affected
-            }
-        })
+        # Update global state — lock prevents Flask handlers from reading a
+        # partially-updated state dict during the multi-key replacement.
+        with state_lock:
+            state.update({
+                "last_update":  datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "warnings":     warnings,
+                "spc":          spc,
+                "earthquakes":  earthquakes,
+                "storms":       storms,
+                "fires":        fires,
+                "lightning":    lightning,
+                "fire_perimeters": fire_perimeters,
+                "map_html":     map_html,
+                "summary": {
+                    "warnings_count":   len(warnings.get("features", [])),
+                    "counties_count":   len(affected),
+                    "total_population": total_pop,
+                    "spc_zones":        len(spc.get("features", [])),
+                    "earthquakes":      len(earthquakes.get("features", [])),
+                    "active_storms":    len(storms),
+                    "wildfires":        len(fires),
+                    "affected_counties": affected
+                }
+            })
         print(f"  Update complete — {len(affected)} counties affected")
         # Save to cache file so data survives restarts
         save_cache({
@@ -936,14 +960,17 @@ def fetch_lightning():
         return {"type": "FeatureCollection", "features": []}
 
 def fetch_fire_perimeters():
-    """Fetch active wildfire perimeters from NIFC WFIGS via ArcGIS REST."""
+    """Fetch active wildfire perimeters from NIFC WFIGS via ArcGIS REST.
+    Queries both sources and merges results, deduplicating by incident name."""
     print("Downloading wildfire perimeters...")
     urls = [
         # NIFC WFIGS current-year interagency perimeters (primary — live REST endpoint)
         "https://services3.arcgis.com/T4QMspbfLg3qTGWY/arcgis/rest/services/WFIGS_Interagency_Perimeters_YTD/FeatureServer/0/query?where=1%3D1&outFields=IncidentName,GISAcres,PercentContained,ModifiedOnDateTime_dt&geometryPrecision=3&outSR=4326&resultRecordCount=500&f=geojson",
-        # NIFC current fires (backup)
+        # NIFC current fires (backup/supplemental)
         "https://services9.arcgis.com/RHVPKKiFTONKtxq3/arcgis/rest/services/USA_Wildfires_v1/FeatureServer/0/query?where=1%3D1&outFields=IncidentName,GISAcres,PercentContained&geometryPrecision=3&outSR=4326&resultRecordCount=300&f=geojson",
     ]
+    all_features = []
+    seen_names = set()
     for url in urls:
         try:
             r = requests.get(url, timeout=30)
@@ -952,15 +979,19 @@ def fetch_fire_perimeters():
             if "error" in data:
                 print(f"  Fire perimeters ArcGIS error: {data['error']}")
                 continue
-            features = data.get("features", [])
-            if features:
-                print(f"  Fire perimeters: {len(features)} active fires")
-                return data
+            for feat in data.get("features", []):
+                name = (feat.get("properties") or {}).get("IncidentName", "")
+                key = name.strip().upper() if name else None
+                if key and key in seen_names:
+                    continue
+                if key:
+                    seen_names.add(key)
+                all_features.append(feat)
         except Exception as e:
             print(f"  Fire perimeters failed ({url[:60]}...): {e}")
             continue
-    print("  Fire perimeters: no data available")
-    return {"type": "FeatureCollection", "features": []}
+    print(f"  Fire perimeters: {len(all_features)} active fires (merged)")
+    return {"type": "FeatureCollection", "features": all_features}
 
 def schedule_updates(interval_minutes=30):
     """Run update on schedule in background thread."""
@@ -982,7 +1013,6 @@ def schedule_updates(interval_minutes=30):
 app = dash.Dash(
     __name__,
     title="National Hazard Monitor",
-    update_title=None,
     external_stylesheets=[
         "https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Fira+Sans:wght@300;400;500;600;700&display=swap"
     ]
@@ -1138,12 +1168,13 @@ def api_infrastructure():
     ]
 
     cache_key = f"{all_minlon:.1f},{all_minlat:.1f},{all_maxlon:.1f},{all_maxlat:.1f}"
-    if state.get("infra_cache_key") == cache_key and state.get("infra_features"):
-        return flask_module.Response(
-            json.dumps({"type": "FeatureCollection", "features": state["infra_features"]}),
-            mimetype="application/json",
-            headers={"Access-Control-Allow-Origin": "*"}
-        )
+    with state_lock:
+        if state.get("infra_cache_key") == cache_key and state.get("infra_features"):
+            return flask_module.Response(
+                json.dumps({"type": "FeatureCollection", "features": state["infra_features"]}),
+                mimetype="application/json",
+                headers={"Access-Control-Allow-Origin": "*"}
+            )
 
     bbox_str = f"{all_minlat},{all_minlon},{all_maxlat},{all_maxlon}"
     
@@ -1152,8 +1183,9 @@ def api_infrastructure():
         try:
             r = requests.post(
                 "https://overpass-api.de/api/interpreter",
-                data={"data": query}, timeout=15
+                data={"data": query}, timeout=20
             )
+            r.raise_for_status()
             items = r.json().get("elements", [])
             for item in items[:500]:
                 lat = item.get("lat")
@@ -1176,8 +1208,9 @@ def api_infrastructure():
             print(f"  Overpass {infra_type} failed: {e}")
             continue
 
-    state["infra_cache_key"] = cache_key
-    state["infra_features"]  = features
+    with state_lock:
+        state["infra_cache_key"] = cache_key
+        state["infra_features"]  = features
 
     return flask_module.Response(
         json.dumps({"type": "FeatureCollection", "features": features}),
