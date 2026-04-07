@@ -1692,53 +1692,72 @@ def mapbox_map():
     <meta charset="utf-8"/>
     <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
     <title>National All-Hazards Monitor</title>
-    <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
     <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
     <script src="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
     <link href="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
-    <script id="tailwind-config">
-        tailwind.config = {{
-            darkMode: "class",
-            theme: {{
-                extend: {{
-                    "colors": {{
-                        "tertiary-fixed-dim": "#b190ff", "inverse-surface": "#f8f9ff",
-                        "error": "#ff716c", "surface-variant": "#152739",
-                        "surface-container-low": "#061422", "on-secondary-container": "#bbd2f3",
-                        "secondary": "#bcd3f4", "secondary-fixed": "#bcd3f4",
-                        "outline-variant": "#3d4957", "tertiary": "#ac89ff",
-                        "on-secondary": "#334964", "background": "#040f1b",
-                        "secondary-container": "#324863", "primary": "#58bfff",
-                        "primary-dim": "#00a8ee", "on-tertiary-fixed": "#1f0052",
-                        "inverse-primary": "#006592", "on-error-container": "#ffa8a3",
-                        "surface-container-high": "#102131", "primary-fixed": "#00b3fe",
-                        "on-tertiary-container": "#f8f1ff", "surface-container": "#0b1b2a",
-                        "surface-bright": "#1b2d41", "tertiary-container": "#7000ff",
-                        "on-error": "#490006", "on-primary-fixed": "#000d18",
-                        "on-background": "#dde9fb", "surface-tint": "#58bfff",
-                        "primary-fixed-dim": "#00a5ea", "error-dim": "#d7383b",
-                        "secondary-dim": "#afc5e6", "tertiary-fixed": "#bda1ff",
-                        "surface-dim": "#040f1b", "inverse-on-surface": "#4a5665",
-                        "surface-container-lowest": "#000000", "primary-container": "#00b3fe",
-                        "on-tertiary-fixed-variant": "#4700a7", "on-secondary-fixed-variant": "#3c526e",
-                        "on-surface-variant": "#a0acbd", "on-tertiary": "#290067",
-                        "on-primary": "#003854", "tertiary-dim": "#874cff",
-                        "on-secondary-fixed": "#1f3550", "secondary-fixed-dim": "#afc5e6",
-                        "on-primary-container": "#002d44", "surface": "#040f1b",
-                        "outline": "#6a7686", "on-surface": "#dde9fb",
-                        "surface-container-highest": "#152739", "on-primary-fixed-variant": "#003751",
-                        "error-container": "#9f0519"
-                    }},
-                    "borderRadius": {{ "DEFAULT": "0px", "lg": "0px", "xl": "0px", "full": "9999px" }},
-                    "fontFamily": {{ "headline": ["Space Grotesk"], "body": ["Inter"], "label": ["Inter"] }}
-                }},
-            }},
-        }}
-    </script>
     <style>
+        /* ── Tailwind-equivalent utility classes (no CDN required) ── */
+        .fixed{{position:fixed}}.absolute{{position:absolute}}.relative{{position:relative}}
+        .inset-0{{inset:0}}.top-0{{top:0}}.left-0{{left:0}}.right-0{{right:0}}.bottom-0{{bottom:0}}
+        .top-4{{top:16px}}.bottom-4{{bottom:16px}}.left-4{{left:16px}}.right-4{{right:16px}}
+        .left-1\/2{{left:50%}}.-translate-x-1\/2{{transform:translateX(-50%)}}
+        .flex{{display:flex}}.grid{{display:grid}}.hidden{{display:none}}.block{{display:block}}.inline-block{{display:inline-block}}
+        .flex-col{{flex-direction:column}}.flex-1{{flex:1 1 0%}}.flex-shrink-0{{flex-shrink:0}}
+        .items-center{{align-items:center}}.items-baseline{{align-items:baseline}}.items-start{{align-items:flex-start}}.items-end{{align-items:flex-end}}
+        .justify-between{{justify-content:space-between}}.justify-center{{justify-content:center}}
+        .mt-auto{{margin-top:auto}}
+        .grid-cols-2{{grid-template-columns:repeat(2,minmax(0,1fr))}}
+        .gap-1{{gap:4px}}.gap-2{{gap:8px}}.gap-3{{gap:12px}}.gap-4{{gap:16px}}.gap-5{{gap:20px}}.gap-6{{gap:24px}}.gap-8{{gap:32px}}
+        .h-full{{height:100%}}.w-full{{width:100%}}.w-fit{{width:fit-content}}
+        .w-20{{width:80px}}.w-2{{width:8px}}.w-2\.5{{width:10px}}.w-6{{width:24px}}.w-8{{width:32px}}
+        .h-2{{height:8px}}.h-2\.5{{height:10px}}.h-6{{height:24px}}.h-8{{height:32px}}
+        .min-w-0{{min-width:0}}
+        .z-10{{z-index:10}}.z-40{{z-index:40}}.z-50{{z-index:50}}
+        .p-3{{padding:12px}}.p-4{{padding:16px}}.p-6{{padding:24px}}.p-8{{padding:32px}}
+        .px-4{{padding-left:16px;padding-right:16px}}.px-5{{padding-left:20px;padding-right:20px}}.px-6{{padding-left:24px;padding-right:24px}}
+        .py-1\.5{{padding-top:6px;padding-bottom:6px}}.py-2{{padding-top:8px;padding-bottom:8px}}
+        .py-2\.5{{padding-top:10px;padding-bottom:10px}}.py-8{{padding-top:32px;padding-bottom:32px}}
+        .mt-1{{margin-top:4px}}.mt-2{{margin-top:8px}}.mt-3{{margin-top:12px}}.mt-4{{margin-top:16px}}
+        .mb-3{{margin-bottom:12px}}.mb-10{{margin-bottom:40px}}
+        .text-xs{{font-size:12px;line-height:16px}}.text-sm{{font-size:14px;line-height:20px}}.text-\[10px\]{{font-size:10px}}
+        .font-bold{{font-weight:700}}.font-mono{{font-family:monospace}}
+        .uppercase{{text-transform:uppercase}}.tracking-widest{{letter-spacing:.1em}}.text-center{{text-align:center}}.text-right{{text-align:right}}
+        .rounded-full{{border-radius:9999px}}
+        .overflow-hidden{{overflow:hidden}}.overflow-y-auto{{overflow-y:auto}}
+        .cursor-pointer{{cursor:pointer}}.pointer-events-auto{{pointer-events:auto}}.pointer-events-none{{pointer-events:none}}
+        .select-none{{user-select:none}}
+        .transition-all{{transition:all 150ms cubic-bezier(.4,0,.2,1)}}
+        .shadow-2xl{{box-shadow:0 25px 50px -12px rgba(0,0,0,.25)}}
+        .backdrop-blur-xl{{backdrop-filter:blur(24px)}}.backdrop-blur-2xl{{backdrop-filter:blur(40px)}}
+        /* Colors */
+        .bg-background{{background-color:#040f1b}}.text-on-surface{{color:#dde9fb}}.text-on-primary{{color:#000d18}}
+        .text-primary{{color:#58bfff}}.text-slate-500{{color:#64748b}}.text-slate-400{{color:#94a3b8}}
+        .bg-primary{{background-color:#58bfff}}.bg-error{{background-color:#ff716c}}
+        .bg-primary\/5{{background-color:rgba(88,191,255,.05)}}.bg-primary\/10{{background-color:rgba(88,191,255,.1)}}.bg-primary\/20{{background-color:rgba(88,191,255,.2)}}
+        .bg-surface-variant\/60{{background-color:rgba(21,39,57,.6)}}
+        .bg-slate-800\/50{{background-color:rgba(30,41,59,.5)}}.bg-slate-900\/60{{background-color:rgba(15,23,42,.6)}}.bg-slate-950\/80{{background-color:rgba(2,6,23,.8)}}
+        .border{{border-width:1px;border-style:solid}}.border-r{{border-right-width:1px;border-right-style:solid}}
+        .border-r-2{{border-right-width:2px;border-right-style:solid}}.border-t-2{{border-top-width:2px;border-top-style:solid}}
+        .border-b-2{{border-bottom-width:2px;border-bottom-style:solid}}.border-b{{border-bottom-width:1px;border-bottom-style:solid}}
+        .border-l-2{{border-left-width:2px;border-left-style:solid}}.border-l-4{{border-left-width:4px;border-left-style:solid}}
+        .border-primary{{border-color:#58bfff}}.border-primary\/10{{border-color:rgba(88,191,255,.1)}}.border-primary\/20{{border-color:rgba(88,191,255,.2)}}
+        .border-primary\/30{{border-color:rgba(88,191,255,.3)}}.border-primary\/40{{border-color:rgba(88,191,255,.4)}}.border-primary\/60{{border-color:rgba(88,191,255,.6)}}
+        .border-error\/60{{border-color:rgba(255,113,108,.6)}}.border-tertiary\/60{{border-color:rgba(172,137,255,.6)}}
+        .border-orange-500\/60{{border-color:rgba(249,115,22,.6)}}.border-amber-500\/60{{border-color:rgba(245,158,11,.6)}}
+        .border-outline-variant\/20{{border-color:rgba(61,73,87,.2)}}
+        /* Hover states */
+        .hover\:bg-primary\/5:hover{{background-color:rgba(88,191,255,.05)}}
+        .hover\:bg-primary-dim:hover{{background-color:#00a8ee}}
+        .hover\:bg-slate-800\/50:hover{{background-color:rgba(30,41,59,.5)}}
+        .hover\:text-primary:hover{{color:#58bfff}}
+        .hover\:border-primary:hover{{border-color:#58bfff}}
+        /* Responsive */
+        @media(min-width:768px){{.md\:flex-row{{flex-direction:row}}}}
+        /* Custom */
+        .glow-purple{{box-shadow:0 0 20px rgba(172,137,255,.3)}}
         * {{ margin: 0; padding: 0; box-sizing: border-box; }}
         body {{ font-family: 'Inter', sans-serif; background-color: #040f1b; overflow: hidden; color: #dde9fb; }}
         #map {{ position: absolute; top: 0; bottom: 0; width: 100%; }}
@@ -1842,7 +1861,7 @@ def mapbox_map():
             <span class="material-symbols-outlined">cyclone</span>
             <span style="font-size:9px;font-weight:700;letter-spacing:2px;">ATMOS</span>
         </button>
-        <button onclick="document.getElementById('address-panel').scrollIntoView()" class="flex flex-col items-center gap-1 text-slate-500 hover:bg-slate-800/50 hover:text-primary py-2 w-20 transition-all" title="Risk">
+        <button onclick="document.getElementById('address-input').focus();document.getElementById('address-panel').style.boxShadow='0 0 0 2px #58bfff';setTimeout(()=>document.getElementById('address-panel').style.boxShadow='',1500)" class="flex flex-col items-center gap-1 text-slate-500 hover:bg-slate-800/50 hover:text-primary py-2 w-20 transition-all" title="Risk">
             <span class="material-symbols-outlined">warning</span>
             <span style="font-size:9px;font-weight:700;letter-spacing:2px;">RISK</span>
         </button>
@@ -1954,37 +1973,37 @@ def mapbox_map():
 <!-- Stat Cards + Hazard Chart (top-left) -->
 <div class="absolute z-10 pointer-events-auto" style="left:96px;top:72px;width:370px;">
     <div class="grid grid-cols-2 gap-3">
-        <div class="glass-panel p-3 border-l-2 border-error/60 relative cursor-pointer hover:bg-primary/5 transition-all">
+        <div class="stat-card glass-panel p-3 border-l-2 border-error/60 relative cursor-pointer hover:bg-primary/5 transition-all">
             <span style="font-size:9px;color:#a0acbd;font-weight:700;letter-spacing:2px;text-transform:uppercase;">Active Warnings</span>
             <div class="flex items-baseline gap-2 mt-1">
                 <span id="stat-warnings" style="font-family:'Space Grotesk',sans-serif;font-size:26px;font-weight:700;color:#dde9fb;">—</span>
             </div>
         </div>
-        <div class="glass-panel p-3 border-l-2 border-primary/60 relative cursor-pointer hover:bg-primary/5 transition-all">
+        <div class="stat-card glass-panel p-3 border-l-2 border-primary/60 relative cursor-pointer hover:bg-primary/5 transition-all">
             <span style="font-size:9px;color:#a0acbd;font-weight:700;letter-spacing:2px;text-transform:uppercase;">Seismic M2.5+</span>
             <div class="flex items-baseline gap-2 mt-1">
                 <span id="stat-eq" style="font-family:'Space Grotesk',sans-serif;font-size:26px;font-weight:700;color:#dde9fb;">—</span>
             </div>
         </div>
-        <div class="glass-panel p-3 border-l-2 border-orange-500/60 relative cursor-pointer hover:bg-primary/5 transition-all">
+        <div class="stat-card glass-panel p-3 border-l-2 border-orange-500/60 relative cursor-pointer hover:bg-primary/5 transition-all">
             <span style="font-size:9px;color:#a0acbd;font-weight:700;letter-spacing:2px;text-transform:uppercase;">Thermal Sites</span>
             <div class="flex items-baseline gap-2 mt-1">
                 <span id="stat-fires" style="font-family:'Space Grotesk',sans-serif;font-size:26px;font-weight:700;color:#dde9fb;">—</span>
             </div>
         </div>
-        <div class="glass-panel p-3 border-l-2 border-tertiary/60 relative cursor-pointer hover:bg-primary/5 transition-all">
+        <div class="stat-card glass-panel p-3 border-l-2 border-tertiary/60 relative cursor-pointer hover:bg-primary/5 transition-all">
             <span style="font-size:9px;color:#a0acbd;font-weight:700;letter-spacing:2px;text-transform:uppercase;">SPC Outlook</span>
             <div class="flex items-baseline gap-2 mt-1">
                 <span id="stat-spc" style="font-family:'Space Grotesk',sans-serif;font-size:26px;font-weight:700;color:#dde9fb;">—</span>
             </div>
         </div>
-        <div class="glass-panel p-3 border-l-2 border-amber-500/60 relative cursor-pointer hover:bg-primary/5 transition-all">
+        <div class="stat-card glass-panel p-3 border-l-2 border-amber-500/60 relative cursor-pointer hover:bg-primary/5 transition-all">
             <span style="font-size:9px;color:#a0acbd;font-weight:700;letter-spacing:2px;text-transform:uppercase;">Counties Alert</span>
             <div class="flex items-baseline gap-2 mt-1">
                 <span id="stat-counties" style="font-family:'Space Grotesk',sans-serif;font-size:26px;font-weight:700;color:#dde9fb;">—</span>
             </div>
         </div>
-        <div class="glass-panel p-3 border-l-2 border-primary/30 relative cursor-pointer hover:bg-primary/5 transition-all">
+        <div class="stat-card glass-panel p-3 border-l-2 border-primary/30 relative cursor-pointer hover:bg-primary/5 transition-all">
             <span style="font-size:9px;color:#a0acbd;font-weight:700;letter-spacing:2px;text-transform:uppercase;">Population Exp.</span>
             <div class="flex items-baseline gap-2 mt-1">
                 <span id="stat-pop" style="font-family:'Space Grotesk',sans-serif;font-size:26px;font-weight:700;color:#dde9fb;">—</span>
@@ -3139,13 +3158,6 @@ function copySitrep() {{
 
 // ── HAZARD OVERVIEW CHART ─────────────────────────
 let _hazardChart = null;
-function toggleDataPanel() {{
-    const body = document.getElementById('data-panel-body');
-    const hdr = document.getElementById('data-panel-header');
-    const hidden = body.style.display === 'none';
-    body.style.display = hidden ? '' : 'none';
-    hdr.textContent = 'HAZARD OVERVIEW ' + (hidden ? '▾' : '▸');
-}}
 function initHazardChart() {{
     const ctx = document.getElementById('hazard-chart').getContext('2d');
     _hazardChart = new Chart(ctx, {{
