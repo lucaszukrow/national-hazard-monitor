@@ -1699,84 +1699,31 @@ def mapbox_map():
     <link href="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
     <style>
-        /* ── Tailwind-equivalent utility classes (no CDN required) ── */
-        .fixed{{position:fixed}}.absolute{{position:absolute}}.relative{{position:relative}}
-        .inset-0{{inset:0}}.top-0{{top:0}}.left-0{{left:0}}.right-0{{right:0}}.bottom-0{{bottom:0}}
-        .top-4{{top:16px}}.bottom-4{{bottom:16px}}.left-4{{left:16px}}.right-4{{right:16px}}
-        .left-1\/2{{left:50%}}.-translate-x-1\/2{{transform:translateX(-50%)}}
-        .flex{{display:flex}}.grid{{display:grid}}.hidden{{display:none}}.block{{display:block}}.inline-block{{display:inline-block}}
-        .flex-col{{flex-direction:column}}.flex-1{{flex:1 1 0%}}.flex-shrink-0{{flex-shrink:0}}
-        .items-center{{align-items:center}}.items-baseline{{align-items:baseline}}.items-start{{align-items:flex-start}}.items-end{{align-items:flex-end}}
-        .justify-between{{justify-content:space-between}}.justify-center{{justify-content:center}}
-        .mt-auto{{margin-top:auto}}
-        .grid-cols-2{{grid-template-columns:repeat(2,minmax(0,1fr))}}
-        .gap-1{{gap:4px}}.gap-2{{gap:8px}}.gap-3{{gap:12px}}.gap-4{{gap:16px}}.gap-5{{gap:20px}}.gap-6{{gap:24px}}.gap-8{{gap:32px}}
-        .h-full{{height:100%}}.w-full{{width:100%}}.w-fit{{width:-webkit-fit-content;width:fit-content}}
-        .w-20{{width:80px}}.w-2{{width:8px}}.w-2\.5{{width:10px}}.w-6{{width:24px}}.w-8{{width:32px}}
-        .h-2{{height:8px}}.h-2\.5{{height:10px}}.h-6{{height:24px}}.h-8{{height:32px}}
-        .min-w-0{{min-width:0}}
-        .z-10{{z-index:10}}.z-40{{z-index:40}}.z-50{{z-index:50}}
-        .p-3{{padding:12px}}.p-4{{padding:16px}}.p-6{{padding:24px}}.p-8{{padding:32px}}
-        .px-4{{padding-left:16px;padding-right:16px}}.px-5{{padding-left:20px;padding-right:20px}}.px-6{{padding-left:24px;padding-right:24px}}
-        .py-1\.5{{padding-top:6px;padding-bottom:6px}}.py-2{{padding-top:8px;padding-bottom:8px}}
-        .py-2\.5{{padding-top:10px;padding-bottom:10px}}.py-8{{padding-top:32px;padding-bottom:32px}}
-        .mt-1{{margin-top:4px}}.mt-2{{margin-top:8px}}.mt-3{{margin-top:12px}}.mt-4{{margin-top:16px}}
-        .mb-3{{margin-bottom:12px}}.mb-10{{margin-bottom:40px}}
-        .text-xs{{font-size:12px;line-height:16px}}.text-sm{{font-size:14px;line-height:20px}}.text-\[10px\]{{font-size:10px}}
-        .font-bold{{font-weight:700}}.font-mono{{font-family:monospace}}
-        .uppercase{{text-transform:uppercase}}.tracking-widest{{letter-spacing:.1em}}.text-center{{text-align:center}}.text-right{{text-align:right}}
-        .rounded-full{{border-radius:9999px}}
-        .overflow-hidden{{overflow:hidden}}.overflow-y-auto{{overflow-y:auto}}
-        .cursor-pointer{{cursor:pointer}}.pointer-events-auto{{pointer-events:auto}}.pointer-events-none{{pointer-events:none}}
-        .select-none{{user-select:none}}
-        .transition-all{{transition:all 150ms cubic-bezier(.4,0,.2,1)}}
-        .shadow-2xl{{box-shadow:0 25px 50px -12px rgba(0,0,0,.25)}}
-        .backdrop-blur-xl{{backdrop-filter:blur(24px)}}.backdrop-blur-2xl{{backdrop-filter:blur(40px)}}
-        /* Colors */
-        .bg-background{{background-color:#040f1b}}.text-on-surface{{color:#dde9fb}}.text-on-primary{{color:#000d18}}
-        .text-primary{{color:#58bfff}}.text-slate-500{{color:#64748b}}.text-slate-400{{color:#94a3b8}}
-        .bg-primary{{background-color:#58bfff}}.bg-error{{background-color:#ff716c}}
-        .bg-primary\/5{{background-color:rgba(88,191,255,.05)}}.bg-primary\/10{{background-color:rgba(88,191,255,.1)}}.bg-primary\/20{{background-color:rgba(88,191,255,.2)}}
-        .bg-surface-variant\/60{{background-color:rgba(21,39,57,.6)}}
-        .bg-slate-800\/50{{background-color:rgba(30,41,59,.5)}}.bg-slate-900\/60{{background-color:rgba(15,23,42,.6)}}.bg-slate-950\/80{{background-color:rgba(2,6,23,.8)}}
-        .border{{border-width:1px;border-style:solid}}.border-r{{border-right-width:1px;border-right-style:solid}}
-        .border-r-2{{border-right-width:2px;border-right-style:solid}}.border-t-2{{border-top-width:2px;border-top-style:solid}}
-        .border-b-2{{border-bottom-width:2px;border-bottom-style:solid}}.border-b{{border-bottom-width:1px;border-bottom-style:solid}}
-        .border-l-2{{border-left-width:2px;border-left-style:solid}}.border-l-4{{border-left-width:4px;border-left-style:solid}}
-        .border-primary{{border-color:#58bfff}}.border-primary\/10{{border-color:rgba(88,191,255,.1)}}.border-primary\/20{{border-color:rgba(88,191,255,.2)}}
-        .border-primary\/30{{border-color:rgba(88,191,255,.3)}}.border-primary\/40{{border-color:rgba(88,191,255,.4)}}.border-primary\/60{{border-color:rgba(88,191,255,.6)}}
-        .border-error\/60{{border-color:rgba(255,113,108,.6)}}.border-tertiary\/60{{border-color:rgba(172,137,255,.6)}}
-        .border-orange-500\/60{{border-color:rgba(249,115,22,.6)}}.border-amber-500\/60{{border-color:rgba(245,158,11,.6)}}
-        .border-outline-variant\/20{{border-color:rgba(61,73,87,.2)}}
-        /* Hover states */
-        .hover\:bg-primary\/5:hover{{background-color:rgba(88,191,255,.05)}}
-        .hover\:bg-primary-dim:hover{{background-color:#00a8ee}}
-        .hover\:bg-slate-800\/50:hover{{background-color:rgba(30,41,59,.5)}}
-        .hover\:text-primary:hover{{color:#58bfff}}
-        .hover\:border-primary:hover{{border-color:#58bfff}}
-        /* Responsive */
-        @media(min-width:768px){{.md\:flex-row{{flex-direction:row}}}}
-        /* Custom */
-        .glow-purple{{box-shadow:0 0 20px rgba(172,137,255,.3)}}
+        /* ── 1. RESET & BASE ─────────────────────────────── */
         * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-        body {{ font-family: 'Inter', sans-serif; background-color: #040f1b; overflow: hidden; color: #dde9fb; }}
+        body {{ font-family: 'Inter', sans-serif; background: #040f1b; overflow: hidden; color: #dde9fb; }}
         #map {{ position: absolute; top: 0; bottom: 0; width: 100%; }}
+
+        /* ── 2. COMPONENT CLASSES ────────────────────────── */
         .material-symbols-outlined {{ font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24; display: inline-block; line-height: 1; vertical-align: middle; }}
         .glass-panel {{ background: rgba(21,39,57,0.6); backdrop-filter: blur(20px); border: 1px solid rgba(88,191,255,0.1); }}
-        .corner-bracket {{ position: absolute; width: 8px; height: 8px; border-color: #58bfff; }}
+        .corner-bracket {{ position: absolute; width: 8px; height: 8px; border-color: #58bfff; border-style: solid; border-width: 0; }}
         .corner-tl {{ top: -1px; left: -1px; border-top-width: 2px; border-left-width: 2px; }}
         .corner-tr {{ top: -1px; right: -1px; border-top-width: 2px; border-right-width: 2px; }}
         .corner-bl {{ bottom: -1px; left: -1px; border-bottom-width: 2px; border-left-width: 2px; }}
         .corner-br {{ bottom: -1px; right: -1px; border-bottom-width: 2px; border-right-width: 2px; }}
         .live-pulse {{ animation: livePulse 2s infinite; border-radius: 50%; }}
         @keyframes livePulse {{
-            0% {{ transform: scale(0.95); box-shadow: 0 0 0 0 rgba(255,113,108,0.7); }}
-            70% {{ transform: scale(1); box-shadow: 0 0 0 8px rgba(255,113,108,0); }}
+            0%   {{ transform: scale(0.95); box-shadow: 0 0 0 0 rgba(255,113,108,0.7); }}
+            70%  {{ transform: scale(1);    box-shadow: 0 0 0 8px rgba(255,113,108,0); }}
             100% {{ transform: scale(0.95); box-shadow: 0 0 0 0 rgba(255,113,108,0); }}
         }}
+        .nav-btn {{ display: flex; flex-direction: column; align-items: center; gap: 4px; width: 80px; padding: 8px 0; cursor: pointer; border: none; background: transparent; color: #64748b; transition: background 150ms, color 150ms; font-family: 'Inter', sans-serif; }}
+        .nav-btn:hover {{ background: rgba(30,41,59,0.5); color: #58bfff; }}
+        .nav-btn.active {{ background: rgba(88,191,255,0.1); color: #58bfff; border-left: 4px solid #58bfff; }}
+        .nav-btn .nav-label {{ font-size: 9px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; }}
         #sitrep-overlay {{ display: none; position: fixed; inset: 0; z-index: 100; align-items: center; justify-content: center; background: rgba(4,15,27,0.85); backdrop-filter: blur(4px); padding: 16px; overflow-y: auto; }}
         #sitrep-overlay.open {{ display: flex; }}
-        #legend.collapsed {{ display: none !important; }}
         #popup {{
             position: absolute; z-index: 20;
             background: linear-gradient(135deg, rgba(0,8,20,0.98) 0%, rgba(0,20,40,0.98) 100%);
@@ -1788,7 +1735,7 @@ def mapbox_map():
         }}
         @keyframes popup-in {{
             from {{ opacity: 0; transform: scale(0.95) translateY(4px); }}
-            to {{ opacity: 1; transform: scale(1) translateY(0); }}
+            to   {{ opacity: 1; transform: scale(1)    translateY(0); }}
         }}
         #popup-header {{ display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid rgba(255,255,255,0.08); }}
         #popup-title {{ font-size: 13px; font-weight: 700; color: white; margin: 0; }}
@@ -1824,6 +1771,61 @@ def mapbox_map():
             #legend-wrap {{ display: none !important; }}
         }}
 
+        /* ── 3. UTILITY CLASSES (always last — highest cascade priority) ── */
+        .fixed{{position:fixed}}.absolute{{position:absolute}}.relative{{position:relative}}
+        .inset-0{{inset:0}}.top-0{{top:0}}.left-0{{left:0}}.right-0{{right:0}}.bottom-0{{bottom:0}}
+        .top-4{{top:16px}}.bottom-4{{bottom:16px}}.left-4{{left:16px}}.right-4{{right:16px}}
+        .left-1\/2{{left:50%}}.-translate-x-1\/2{{transform:translateX(-50%)}}
+        .flex{{display:flex}}.grid{{display:grid}}.hidden{{display:none}}.block{{display:block}}.inline-block{{display:inline-block}}
+        .flex-col{{flex-direction:column}}.flex-1{{flex:1 1 0%}}.flex-shrink-0{{flex-shrink:0}}
+        .items-center{{align-items:center}}.items-baseline{{align-items:baseline}}.items-start{{align-items:flex-start}}.items-end{{align-items:flex-end}}
+        .justify-between{{justify-content:space-between}}.justify-center{{justify-content:center}}
+        .mt-auto{{margin-top:auto}}
+        .grid-cols-2{{grid-template-columns:repeat(2,minmax(0,1fr))}}
+        .gap-1{{gap:4px}}.gap-2{{gap:8px}}.gap-3{{gap:12px}}.gap-4{{gap:16px}}.gap-5{{gap:20px}}.gap-6{{gap:24px}}.gap-8{{gap:32px}}
+        .h-full{{height:100%}}.w-full{{width:100%}}.w-fit{{width:-webkit-fit-content;width:fit-content}}
+        .w-20{{width:80px}}.w-2{{width:8px}}.w-2\.5{{width:10px}}.w-6{{width:24px}}.w-8{{width:32px}}
+        .h-2{{height:8px}}.h-2\.5{{height:10px}}.h-6{{height:24px}}.h-8{{height:32px}}
+        .min-w-0{{min-width:0}}
+        .z-10{{z-index:10}}.z-40{{z-index:40}}.z-50{{z-index:50}}
+        .p-3{{padding:12px}}.p-4{{padding:16px}}.p-6{{padding:24px}}.p-8{{padding:32px}}
+        .px-4{{padding-left:16px;padding-right:16px}}.px-5{{padding-left:20px;padding-right:20px}}.px-6{{padding-left:24px;padding-right:24px}}
+        .py-1\.5{{padding-top:6px;padding-bottom:6px}}.py-2{{padding-top:8px;padding-bottom:8px}}
+        .py-2\.5{{padding-top:10px;padding-bottom:10px}}.py-8{{padding-top:32px;padding-bottom:32px}}
+        .mt-1{{margin-top:4px}}.mt-2{{margin-top:8px}}.mt-3{{margin-top:12px}}.mt-4{{margin-top:16px}}
+        .mb-3{{margin-bottom:12px}}.mb-10{{margin-bottom:40px}}
+        .text-xs{{font-size:12px;line-height:16px}}.text-sm{{font-size:14px;line-height:20px}}.text-\[10px\]{{font-size:10px}}
+        .font-bold{{font-weight:700}}.font-mono{{font-family:monospace}}
+        .uppercase{{text-transform:uppercase}}.tracking-widest{{letter-spacing:.1em}}.text-center{{text-align:center}}.text-right{{text-align:right}}
+        .rounded-full{{border-radius:9999px}}
+        .overflow-hidden{{overflow:hidden}}.overflow-y-auto{{overflow-y:auto}}
+        .cursor-pointer{{cursor:pointer}}.pointer-events-auto{{pointer-events:auto}}.pointer-events-none{{pointer-events:none}}
+        .select-none{{user-select:none}}
+        .transition-all{{transition:all 150ms cubic-bezier(.4,0,.2,1)}}
+        .shadow-2xl{{box-shadow:0 25px 50px -12px rgba(0,0,0,.25)}}
+        .backdrop-blur-xl{{backdrop-filter:blur(24px)}}.backdrop-blur-2xl{{backdrop-filter:blur(40px)}}
+        .bg-background{{background-color:#040f1b}}.text-on-surface{{color:#dde9fb}}.text-on-primary{{color:#000d18}}
+        .text-primary{{color:#58bfff !important}}.text-slate-500{{color:#64748b}}.text-slate-400{{color:#94a3b8}}
+        .bg-primary{{background-color:#58bfff}}.bg-error{{background-color:#ff716c}}
+        .bg-primary\/5{{background-color:rgba(88,191,255,.05)}}.bg-primary\/10{{background-color:rgba(88,191,255,.1) !important}}.bg-primary\/20{{background-color:rgba(88,191,255,.2)}}
+        .bg-surface-variant\/60{{background-color:rgba(21,39,57,.6)}}
+        .bg-slate-800\/50{{background-color:rgba(30,41,59,.5)}}.bg-slate-900\/60{{background-color:rgba(15,23,42,.6)}}.bg-slate-950\/80{{background-color:rgba(2,6,23,.8)}}
+        .border{{border-width:1px;border-style:solid}}.border-r{{border-right-width:1px;border-right-style:solid}}
+        .border-r-2{{border-right-width:2px;border-right-style:solid}}.border-t-2{{border-top-width:2px;border-top-style:solid}}
+        .border-b-2{{border-bottom-width:2px;border-bottom-style:solid}}.border-b{{border-bottom-width:1px;border-bottom-style:solid}}
+        .border-l-2{{border-left-width:2px !important;border-left-style:solid !important}}.border-l-4{{border-left-width:4px !important;border-left-style:solid !important}}
+        .border-primary{{border-color:#58bfff}}.border-primary\/10{{border-color:rgba(88,191,255,.1)}}.border-primary\/20{{border-color:rgba(88,191,255,.2)}}
+        .border-primary\/30{{border-color:rgba(88,191,255,.3)}}.border-primary\/40{{border-color:rgba(88,191,255,.4)}}.border-primary\/60{{border-color:rgba(88,191,255,.6)}}
+        .border-error\/60{{border-color:rgba(255,113,108,.6)}}.border-tertiary\/60{{border-color:rgba(172,137,255,.6)}}
+        .border-orange-500\/60{{border-color:rgba(249,115,22,.6)}}.border-amber-500\/60{{border-color:rgba(245,158,11,.6)}}
+        .border-outline-variant\/20{{border-color:rgba(61,73,87,.2)}}
+        .hover\:bg-primary\/5:hover{{background-color:rgba(88,191,255,.05)}}
+        .hover\:bg-primary-dim:hover{{background-color:#00a8ee}}
+        .hover\:bg-slate-800\/50:hover{{background-color:rgba(30,41,59,.5)}}
+        .hover\:text-primary:hover{{color:#58bfff}}
+        .hover\:border-primary:hover{{border-color:#58bfff}}
+        @media(min-width:768px){{.md\:flex-row{{flex-direction:row}}}}
+        .glow-purple{{box-shadow:0 0 20px rgba(172,137,255,.3)}}
     </style>
 </head>
 <body class="bg-background text-on-surface overflow-hidden select-none">
@@ -1837,38 +1839,38 @@ def mapbox_map():
 <div class="fixed bottom-4 right-4 w-6 h-6 border-b-2 border-r-2 border-primary/40 z-50 pointer-events-none"></div>
 
 <!-- Sidebar nav -->
-<nav class="sidebar fixed left-0 top-0 h-full z-40 flex flex-col items-center py-8 bg-slate-950/80 backdrop-blur-2xl border-r border-primary/10 w-20">
-    <div class="mb-10 flex flex-col items-center">
-        <span class="text-primary font-bold text-xs" style="font-family:'Space Grotesk',sans-serif;">M.C.</span>
-        <div class="w-8 h-8 mt-2 bg-primary/20 flex items-center justify-center">
-            <span class="material-symbols-outlined text-primary" style="font-size:20px;">radar</span>
+<nav class="sidebar fixed left-0 top-0 h-full z-40 flex flex-col items-center py-8" style="background:rgba(2,6,23,0.85);backdrop-filter:blur(24px);border-right:1px solid rgba(88,191,255,0.1);width:80px;">
+    <div class="mb-10 flex flex-col items-center gap-2">
+        <span style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:12px;color:#58bfff;">M.C.</span>
+        <div style="width:32px;height:32px;background:rgba(88,191,255,0.15);display:flex;align-items:center;justify-content:center;">
+            <span class="material-symbols-outlined" style="font-size:20px;color:#58bfff;">radar</span>
         </div>
     </div>
-    <div class="flex flex-col gap-6 flex-1">
-        <button onclick="toggleLayerPanel()" class="flex flex-col items-center gap-1 border-l-4 border-primary bg-primary/10 text-primary py-2 w-20 transition-all" title="Layers">
-            <span class="material-symbols-outlined">layers</span>
-            <span style="font-size:9px;font-weight:700;letter-spacing:2px;">LAYERS</span>
+    <div class="flex flex-col flex-1" style="gap:4px;width:100%;">
+        <button id="btn-layers" onclick="toggleLayerPanel();setSidebarActive(this)" class="nav-btn active" title="Toggle Layers">
+            <span class="material-symbols-outlined" style="font-size:22px;">layers</span>
+            <span class="nav-label">LAYERS</span>
         </button>
-        <button onclick="flyToEarthquakes()" class="flex flex-col items-center gap-1 text-slate-500 hover:bg-slate-800/50 hover:text-primary py-2 w-20 transition-all" title="Seismic">
-            <span class="material-symbols-outlined">tsunami</span>
-            <span style="font-size:9px;font-weight:700;letter-spacing:2px;">SEISMIC</span>
+        <button id="btn-seismic" onclick="flyToEarthquakes();setSidebarActive(this)" class="nav-btn" title="Fly to earthquakes">
+            <span class="material-symbols-outlined" style="font-size:22px;">tsunami</span>
+            <span class="nav-label">SEISMIC</span>
         </button>
-        <button onclick="flyToFires()" class="flex flex-col items-center gap-1 text-slate-500 hover:bg-slate-800/50 hover:text-primary py-2 w-20 transition-all" title="Thermal">
-            <span class="material-symbols-outlined">local_fire_department</span>
-            <span style="font-size:9px;font-weight:700;letter-spacing:2px;">THERMAL</span>
+        <button id="btn-thermal" onclick="flyToFires();setSidebarActive(this)" class="nav-btn" title="Fly to fire activity">
+            <span class="material-symbols-outlined" style="font-size:22px;">local_fire_department</span>
+            <span class="nav-label">THERMAL</span>
         </button>
-        <button onclick="flyToWarnings()" class="flex flex-col items-center gap-1 text-slate-500 hover:bg-slate-800/50 hover:text-primary py-2 w-20 transition-all" title="Atmospheric">
-            <span class="material-symbols-outlined">cyclone</span>
-            <span style="font-size:9px;font-weight:700;letter-spacing:2px;">ATMOS</span>
+        <button id="btn-atmos" onclick="flyToWarnings();setSidebarActive(this)" class="nav-btn" title="Fly to active warnings">
+            <span class="material-symbols-outlined" style="font-size:22px;">cyclone</span>
+            <span class="nav-label">ATMOS</span>
         </button>
-        <button onclick="document.getElementById('address-input').focus();document.getElementById('address-panel').style.boxShadow='0 0 0 2px #58bfff';setTimeout(()=>document.getElementById('address-panel').style.boxShadow='',1500)" class="flex flex-col items-center gap-1 text-slate-500 hover:bg-slate-800/50 hover:text-primary py-2 w-20 transition-all" title="Risk">
-            <span class="material-symbols-outlined">warning</span>
-            <span style="font-size:9px;font-weight:700;letter-spacing:2px;">RISK</span>
+        <button id="btn-risk" onclick="focusThreatPanel();setSidebarActive(this)" class="nav-btn" title="Run threat analysis">
+            <span class="material-symbols-outlined" style="font-size:22px;">warning</span>
+            <span class="nav-label">RISK</span>
         </button>
     </div>
-    <button onclick="document.documentElement.requestFullscreen?.()" class="flex flex-col items-center gap-1 text-slate-500 hover:bg-slate-800/50 hover:text-primary py-2 w-20 transition-all mt-auto" title="Fullscreen">
-        <span class="material-symbols-outlined">fullscreen</span>
-        <span style="font-size:9px;font-weight:700;letter-spacing:2px;">EXPAND</span>
+    <button onclick="document.documentElement.requestFullscreen?.()" class="nav-btn mt-auto" title="Fullscreen">
+        <span class="material-symbols-outlined" style="font-size:22px;">fullscreen</span>
+        <span class="nav-label">EXPAND</span>
     </button>
 </nav>
 
@@ -1973,37 +1975,37 @@ def mapbox_map():
 <!-- Stat Cards + Hazard Chart (top-left) -->
 <div class="absolute z-10 pointer-events-auto" style="left:96px;top:72px;width:370px;">
     <div class="grid grid-cols-2 gap-3">
-        <div class="stat-card glass-panel p-3 border-l-2 border-error/60 relative cursor-pointer hover:bg-primary/5 transition-all">
+        <div class="stat-card glass-panel p-3 relative cursor-pointer transition-all" style="border-left:3px solid rgba(255,113,108,0.7);">
             <span style="font-size:9px;color:#a0acbd;font-weight:700;letter-spacing:2px;text-transform:uppercase;">Active Warnings</span>
             <div class="flex items-baseline gap-2 mt-1">
                 <span id="stat-warnings" style="font-family:'Space Grotesk',sans-serif;font-size:26px;font-weight:700;color:#dde9fb;">—</span>
             </div>
         </div>
-        <div class="stat-card glass-panel p-3 border-l-2 border-primary/60 relative cursor-pointer hover:bg-primary/5 transition-all">
+        <div class="stat-card glass-panel p-3 relative cursor-pointer transition-all" style="border-left:3px solid rgba(88,191,255,0.7);">
             <span style="font-size:9px;color:#a0acbd;font-weight:700;letter-spacing:2px;text-transform:uppercase;">Seismic M2.5+</span>
             <div class="flex items-baseline gap-2 mt-1">
                 <span id="stat-eq" style="font-family:'Space Grotesk',sans-serif;font-size:26px;font-weight:700;color:#dde9fb;">—</span>
             </div>
         </div>
-        <div class="stat-card glass-panel p-3 border-l-2 border-orange-500/60 relative cursor-pointer hover:bg-primary/5 transition-all">
+        <div class="stat-card glass-panel p-3 relative cursor-pointer transition-all" style="border-left:3px solid rgba(249,115,22,0.7);">
             <span style="font-size:9px;color:#a0acbd;font-weight:700;letter-spacing:2px;text-transform:uppercase;">Thermal Sites</span>
             <div class="flex items-baseline gap-2 mt-1">
                 <span id="stat-fires" style="font-family:'Space Grotesk',sans-serif;font-size:26px;font-weight:700;color:#dde9fb;">—</span>
             </div>
         </div>
-        <div class="stat-card glass-panel p-3 border-l-2 border-tertiary/60 relative cursor-pointer hover:bg-primary/5 transition-all">
+        <div class="stat-card glass-panel p-3 relative cursor-pointer transition-all" style="border-left:3px solid rgba(172,137,255,0.7);">
             <span style="font-size:9px;color:#a0acbd;font-weight:700;letter-spacing:2px;text-transform:uppercase;">SPC Outlook</span>
             <div class="flex items-baseline gap-2 mt-1">
                 <span id="stat-spc" style="font-family:'Space Grotesk',sans-serif;font-size:26px;font-weight:700;color:#dde9fb;">—</span>
             </div>
         </div>
-        <div class="stat-card glass-panel p-3 border-l-2 border-amber-500/60 relative cursor-pointer hover:bg-primary/5 transition-all">
+        <div class="stat-card glass-panel p-3 relative cursor-pointer transition-all" style="border-left:3px solid rgba(245,158,11,0.7);">
             <span style="font-size:9px;color:#a0acbd;font-weight:700;letter-spacing:2px;text-transform:uppercase;">Counties Alert</span>
             <div class="flex items-baseline gap-2 mt-1">
                 <span id="stat-counties" style="font-family:'Space Grotesk',sans-serif;font-size:26px;font-weight:700;color:#dde9fb;">—</span>
             </div>
         </div>
-        <div class="stat-card glass-panel p-3 border-l-2 border-primary/30 relative cursor-pointer hover:bg-primary/5 transition-all">
+        <div class="stat-card glass-panel p-3 relative cursor-pointer transition-all" style="border-left:3px solid rgba(88,191,255,0.3);">
             <span style="font-size:9px;color:#a0acbd;font-weight:700;letter-spacing:2px;text-transform:uppercase;">Population Exp.</span>
             <div class="flex items-baseline gap-2 mt-1">
                 <span id="stat-pop" style="font-family:'Space Grotesk',sans-serif;font-size:26px;font-weight:700;color:#dde9fb;">—</span>
@@ -2142,6 +2144,16 @@ function toggleLegend() {{
 }}
 
 // ── SIDEBAR HELPERS ───────────────────────────────
+function setSidebarActive(btn) {{
+    document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+}}
+function focusThreatPanel() {{
+    const panel = document.getElementById('address-panel');
+    panel.style.boxShadow = '0 0 0 2px #58bfff, 0 0 20px rgba(88,191,255,0.3)';
+    setTimeout(() => {{ panel.style.boxShadow = ''; }}, 1600);
+    document.getElementById('address-input').focus();
+}}
 function toggleLayerPanel() {{
     const p = document.getElementById('layer-panel');
     if (!p) return;
@@ -2261,16 +2273,15 @@ function setupLayers() {{
         }}
     }});
 
-    // Warning pulse animation
+    // Warning pulse animation — 200ms (5fps) is plenty for a subtle glow
     let opacity = 0.45;
     let direction = -1;
     setInterval(() => {{
-        opacity += direction * 0.02;
-        if (opacity < 0.25 || opacity > 0.55) direction *= -1;
-        if (map.getLayer('warnings-fill')) {{
-            map.setPaintProperty('warnings-fill', 'fill-opacity', opacity);
-        }}
-    }}, 80);
+        if (!map.getLayer('warnings-fill')) return;
+        opacity += direction * 0.04;
+        if (opacity <= 0.25 || opacity >= 0.55) direction *= -1;
+        map.setPaintProperty('warnings-fill', 'fill-opacity', opacity);
+    }}, 200);
 
     // ── EARTHQUAKES ──────────────────────────────────
     map.addSource('earthquakes', {{ type: 'geojson', data: '/api/earthquakes' }});
@@ -2622,14 +2633,15 @@ function setupLayers() {{
     map.on('mouseenter', 'storm-track', () => map.getCanvas().style.cursor = 'pointer');
     map.on('mouseleave', 'storm-track', () => map.getCanvas().style.cursor = '');
 
-    // Animate hurricane track — pulse radius on each point sequentially
+    // Animate hurricane track — only when storm data is present
     let _stormFrame = 0;
     setInterval(() => {{
         if (!map.getLayer('storm-track')) return;
+        if (!_latestStorms?.features?.length) return;
         const pulse = 7 + Math.sin(_stormFrame * 0.15) * 3;
         map.setPaintProperty('storm-track', 'circle-radius', pulse);
         _stormFrame++;
-    }}, 80);
+    }}, 150);
 
     // ── DROUGHT MONITOR ──────────────────────────────
     map.addSource('drought', {{ type: 'geojson', data: '/api/drought' }});
@@ -2917,6 +2929,7 @@ function setupLayers() {{
     let _latestWarnings    = null;
     let _latestEarthquakes = null;
     let _latestFires       = null;
+    let _latestStorms      = null;
 
     function loadData() {{
         fetch('/api/summary').then(r => r.json()).then(data => {{
@@ -2980,6 +2993,7 @@ function setupLayers() {{
                 fetch('/api/warnings').then(r=>r.json()).then(d=>{{ _latestWarnings = d; wireStatCards(); }}).catch(()=>{{}});
                 fetch('/api/earthquakes').then(r=>r.json()).then(d=>{{ _latestEarthquakes = d; wireStatCards(); }}).catch(()=>{{}});
                 fetch('/api/fires').then(r=>r.json()).then(d=>{{ _latestFires = d; wireStatCards(); }}).catch(()=>{{}});
+                fetch('/api/storms').then(r=>r.json()).then(d=>{{ _latestStorms = d; }}).catch(()=>{{}});
             }}
         }}).catch(err => {{
             console.log('Fetch failed, retrying in 10s...', err);
