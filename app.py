@@ -2273,15 +2273,16 @@ function setupLayers() {{
         }}
     }});
 
-    // Warning pulse animation — 200ms (5fps) is plenty for a subtle glow
-    let opacity = 0.45;
+    // Warning pulse — only animate when there are actual warning features
+    let opacity = 0.4;
     let direction = -1;
     setInterval(() => {{
         if (!map.getLayer('warnings-fill')) return;
-        opacity += direction * 0.04;
-        if (opacity <= 0.25 || opacity >= 0.55) direction *= -1;
+        if (!_latestWarnings?.features?.length) return; // no-op when 0 warnings
+        opacity += direction * 0.05;
+        if (opacity <= 0.2 || opacity >= 0.6) direction *= -1;
         map.setPaintProperty('warnings-fill', 'fill-opacity', opacity);
-    }}, 200);
+    }}, 250);
 
     // ── EARTHQUAKES ──────────────────────────────────
     map.addSource('earthquakes', {{ type: 'geojson', data: '/api/earthquakes' }});
@@ -2802,21 +2803,21 @@ function setupLayers() {{
     hoverTooltip.id = 'hover-tooltip';
     document.body.appendChild(hoverTooltip);
 
+    let _tooltipLastFid = null;
     map.on('mousemove', 'counties-fill', (e) => {{
         const p = e.features[0].properties;
-        const pop = Number(p.population).toLocaleString();
-        hoverTooltip.innerHTML = `
-            <span style="color:#FF9600;font-weight:700;">${{p.county}}, ${{p.state}}</span><br>
-            <span style="color:rgba(255,255,255,0.5);">Pop: </span>
-            <span style="color:white;">${{pop}}</span>
-            <span style="color:rgba(255,255,255,0.25);"> · </span>
-            <span style="color:#FF8888;">${{p.event || ''}}</span>
-        `;
+        const fid = p.county + p.state;
+        // Only rebuild innerHTML when hovering a different county
+        if (fid !== _tooltipLastFid) {{
+            _tooltipLastFid = fid;
+            const pop = Number(p.population).toLocaleString();
+            hoverTooltip.innerHTML = `<span style="color:#FF9600;font-weight:700;">${{p.county}}, ${{p.state}}</span><br><span style="color:rgba(255,255,255,0.5);">Pop: </span><span style="color:#fff;">${{pop}}</span>${{p.event ? ` <span style="color:#FF8888;">· ${{p.event}}</span>` : ''}}`;
+        }}
         hoverTooltip.style.display = 'block';
-        hoverTooltip.style.left = Math.min(e.point.x + 14, window.innerWidth - 280) + 'px';
-        hoverTooltip.style.top  = Math.max(e.point.y - 52, 10) + 'px';
+        hoverTooltip.style.left = Math.min(e.point.x+14, window.innerWidth-280) + 'px';
+        hoverTooltip.style.top  = Math.max(e.point.y-52, 10) + 'px';
     }});
-    map.on('mouseleave', 'counties-fill', () => {{ hoverTooltip.style.display = 'none'; }});
+    map.on('mouseleave', 'counties-fill', () => {{ hoverTooltip.style.display = 'none'; _tooltipLastFid = null; }});
 
     // ── NEXRAD AUTO-REFRESH (every 60s for latest radar) ─
     setInterval(() => {{
@@ -2968,16 +2969,24 @@ function setupLayers() {{
 
             updateHazardChart(s);
 
-            // Refresh all map sources with fresh data
+            // Stagger source refreshes 40ms apart — prevents 16 simultaneous
+            // tile-processing operations that cause a visible GPU stutter spike
             if (map.loaded()) {{
-                ['warnings','spc','earthquakes','fires','fires-heat','counties',
-                 'infrastructure','lightning','fire_perimeters','storms',
-                 'air_quality','fema_disasters','river_gauges','volcanoes','drought','shelters'
-                ].forEach(src => {{
-                    if (map.getSource(src)) {{
-                        map.getSource(src).setData('/api/' + src.replace('-heat','') + '?t=' + Date.now());
-                    }}
+                const t = Date.now();
+                const srcs = ['warnings','spc','earthquakes','fires','fires-heat','counties',
+                    'lightning','fire_perimeters','storms','fema_disasters',
+                    'river_gauges','volcanoes','drought','shelters','air_quality'];
+                srcs.forEach((src, i) => {{
+                    setTimeout(() => {{
+                        if (map.getSource(src)) {{
+                            map.getSource(src).setData('/api/' + src.replace('-heat','') + '?t=' + t);
+                        }}
+                    }}, i * 40);
                 }});
+                // Infrastructure refreshes separately — can take up to 20s from Overpass
+                if (map.getSource('infrastructure')) {{
+                    setTimeout(() => map.getSource('infrastructure').setData('/api/infrastructure?t=' + t), srcs.length * 40);
+                }}
             }}
 
             // If no data yet retry in 10 seconds
@@ -3062,7 +3071,7 @@ function setupLayers() {{
 
     // Load immediately then every 5 minutes
     loadData();
-    setInterval(loadData, 5 * 60 * 1000);
+    setInterval(loadData, 10 * 60 * 1000);
 }}
 
 // Use exact Mapbox recommended pattern
