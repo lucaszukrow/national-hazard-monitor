@@ -1687,553 +1687,392 @@ def mapbox_map():
     """Serves the full Mapbox GL JS map page."""
     MAPBOX_TOKEN = os.environ.get("MAPBOX_TOKEN", "")
     html = f"""<!DOCTYPE html>
-<html>
+<html class="dark" lang="en">
 <head>
-    <meta charset="utf-8">
-    <title>National Hazard Monitor</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta charset="utf-8"/>
+    <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+    <title>National All-Hazards Monitor</title>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
     <script src="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
     <link href="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.css" rel="stylesheet">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+    <script id="tailwind-config">
+        tailwind.config = {{
+            darkMode: "class",
+            theme: {{
+                extend: {{
+                    "colors": {{
+                        "tertiary-fixed-dim": "#b190ff", "inverse-surface": "#f8f9ff",
+                        "error": "#ff716c", "surface-variant": "#152739",
+                        "surface-container-low": "#061422", "on-secondary-container": "#bbd2f3",
+                        "secondary": "#bcd3f4", "secondary-fixed": "#bcd3f4",
+                        "outline-variant": "#3d4957", "tertiary": "#ac89ff",
+                        "on-secondary": "#334964", "background": "#040f1b",
+                        "secondary-container": "#324863", "primary": "#58bfff",
+                        "primary-dim": "#00a8ee", "on-tertiary-fixed": "#1f0052",
+                        "inverse-primary": "#006592", "on-error-container": "#ffa8a3",
+                        "surface-container-high": "#102131", "primary-fixed": "#00b3fe",
+                        "on-tertiary-container": "#f8f1ff", "surface-container": "#0b1b2a",
+                        "surface-bright": "#1b2d41", "tertiary-container": "#7000ff",
+                        "on-error": "#490006", "on-primary-fixed": "#000d18",
+                        "on-background": "#dde9fb", "surface-tint": "#58bfff",
+                        "primary-fixed-dim": "#00a5ea", "error-dim": "#d7383b",
+                        "secondary-dim": "#afc5e6", "tertiary-fixed": "#bda1ff",
+                        "surface-dim": "#040f1b", "inverse-on-surface": "#4a5665",
+                        "surface-container-lowest": "#000000", "primary-container": "#00b3fe",
+                        "on-tertiary-fixed-variant": "#4700a7", "on-secondary-fixed-variant": "#3c526e",
+                        "on-surface-variant": "#a0acbd", "on-tertiary": "#290067",
+                        "on-primary": "#003854", "tertiary-dim": "#874cff",
+                        "on-secondary-fixed": "#1f3550", "secondary-fixed-dim": "#afc5e6",
+                        "on-primary-container": "#002d44", "surface": "#040f1b",
+                        "outline": "#6a7686", "on-surface": "#dde9fb",
+                        "surface-container-highest": "#152739", "on-primary-fixed-variant": "#003751",
+                        "error-container": "#9f0519"
+                    }},
+                    "borderRadius": {{ "DEFAULT": "0px", "lg": "0px", "xl": "0px", "full": "9999px" }},
+                    "fontFamily": {{ "headline": ["Space Grotesk"], "body": ["Inter"], "label": ["Inter"] }}
+                }},
+            }},
+        }}
+    </script>
     <style>
         * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-        body {{ background: #000; font-family: 'Inter', Arial, sans-serif; color: white; overflow: hidden; }}
+        body {{ font-family: 'Inter', sans-serif; background-color: #040f1b; overflow: hidden; color: #dde9fb; }}
         #map {{ position: absolute; top: 0; bottom: 0; width: 100%; }}
-
-        /* ── SCAN LINE OVERLAY ── */
-        body::after {{
-            content: '';
-            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-            background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.03) 2px, rgba(0,0,0,0.03) 4px);
-            pointer-events: none; z-index: 5;
+        .material-symbols-outlined {{ font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24; display: inline-block; line-height: 1; vertical-align: middle; }}
+        .glass-panel {{ background: rgba(21,39,57,0.6); backdrop-filter: blur(20px); border: 1px solid rgba(88,191,255,0.1); }}
+        .corner-bracket {{ position: absolute; width: 8px; height: 8px; border-color: #58bfff; }}
+        .corner-tl {{ top: -1px; left: -1px; border-top-width: 2px; border-left-width: 2px; }}
+        .corner-tr {{ top: -1px; right: -1px; border-top-width: 2px; border-right-width: 2px; }}
+        .corner-bl {{ bottom: -1px; left: -1px; border-bottom-width: 2px; border-left-width: 2px; }}
+        .corner-br {{ bottom: -1px; right: -1px; border-bottom-width: 2px; border-right-width: 2px; }}
+        .live-pulse {{ animation: livePulse 2s infinite; border-radius: 50%; }}
+        @keyframes livePulse {{
+            0% {{ transform: scale(0.95); box-shadow: 0 0 0 0 rgba(255,113,108,0.7); }}
+            70% {{ transform: scale(1); box-shadow: 0 0 0 8px rgba(255,113,108,0); }}
+            100% {{ transform: scale(0.95); box-shadow: 0 0 0 0 rgba(255,113,108,0); }}
         }}
-
-        /* ── HEADER ── */
-        #header {{
-            position: absolute; top: 14px; left: 50%; transform: translateX(-50%);
-            z-index: 10;
-            background: linear-gradient(135deg, rgba(0,8,20,0.95) 0%, rgba(0,20,40,0.95) 100%);
-            border: 1px solid rgba(0,180,255,0.3);
-            border-radius: 12px;
-            padding: 10px 24px;
-            text-align: center;
-            backdrop-filter: blur(20px);
-            box-shadow: 0 0 30px rgba(0,180,255,0.15), inset 0 1px 0 rgba(255,255,255,0.05);
-            white-space: nowrap;
-        }}
-        #header::before {{
-            content: '';
-            position: absolute; top: -1px; left: 20%; right: 20%; height: 1px;
-            background: linear-gradient(90deg, transparent, rgba(0,180,255,0.8), transparent);
-        }}
-        #header h1 {{
-            font-size: 17px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase;
-            background: linear-gradient(135deg, #AAD4FF, #00B4FF);
-            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-            margin: 0;
-        }}
-        #header p {{ font-size: 10px; color: rgba(100,180,255,0.6); margin: 4px 0 0 0; letter-spacing: 1px; }}
-        #sitrep-btn {{
-            margin-top: 6px; padding: 4px 12px; font-size: 9px; font-weight: 600;
-            letter-spacing: 1.5px; text-transform: uppercase;
-            background: rgba(0,180,255,0.12); border: 1px solid rgba(0,180,255,0.35);
-            border-radius: 6px; color: rgba(0,200,255,0.9); cursor: pointer;
-            font-family: 'Inter', Arial, sans-serif; transition: background 0.2s, border-color 0.2s;
-        }}
-        #sitrep-btn:hover {{ background: rgba(0,180,255,0.22); border-color: rgba(0,180,255,0.6); }}
-
-        /* ── SITREP MODAL ── */
-        #sitrep-overlay {{
-            display: none; position: fixed; inset: 0; z-index: 50;
-            background: rgba(0,0,0,0.7); backdrop-filter: blur(4px);
-            align-items: center; justify-content: center;
-        }}
+        #sitrep-overlay {{ display: none; position: fixed; inset: 0; z-index: 100; align-items: center; justify-content: center; background: rgba(4,15,27,0.85); backdrop-filter: blur(4px); padding: 16px; overflow-y: auto; }}
         #sitrep-overlay.open {{ display: flex; }}
-        #sitrep-modal {{
-            background: linear-gradient(135deg, rgba(0,10,28,0.98) 0%, rgba(0,20,45,0.98) 100%);
-            border: 1px solid rgba(0,180,255,0.3); border-radius: 14px;
-            padding: 24px; width: min(600px, 92vw); max-height: 80vh;
-            overflow-y: auto; box-shadow: 0 0 60px rgba(0,180,255,0.15);
-            position: relative;
-        }}
-        #sitrep-modal h3 {{
-            font-size: 11px; letter-spacing: 2px; text-transform: uppercase;
-            color: rgba(0,200,255,0.8); margin-bottom: 14px;
-            border-bottom: 1px solid rgba(0,180,255,0.2); padding-bottom: 10px;
-        }}
-        #sitrep-body {{ font-size: 13px; line-height: 1.7; color: rgba(255,255,255,0.85); }}
-        #sitrep-body p {{ margin-bottom: 12px; }}
-        #sitrep-close {{
-            position: absolute; top: 14px; right: 16px;
-            background: transparent; border: none; color: rgba(255,255,255,0.4);
-            font-size: 18px; cursor: pointer; line-height: 1;
-        }}
-        #sitrep-close:hover {{ color: white; }}
-        #sitrep-footer {{
-            display: flex; gap: 10px; margin-top: 14px;
-            border-top: 1px solid rgba(255,255,255,0.07); padding-top: 12px;
-        }}
-        .sitrep-action-btn {{
-            padding: 6px 14px; font-size: 10px; font-weight: 600; letter-spacing: 1px;
-            text-transform: uppercase; border-radius: 6px; cursor: pointer;
-            font-family: 'Inter', Arial, sans-serif; border: 1px solid rgba(0,180,255,0.3);
-            background: rgba(0,180,255,0.1); color: rgba(0,200,255,0.8);
-            transition: background 0.2s;
-        }}
-        .sitrep-action-btn:hover {{ background: rgba(0,180,255,0.2); }}
-        #sitrep-copy-feedback {{ font-size: 10px; color: #00FF88; align-self: center; }}
-
-        /* ── DATA PANEL (Charts) ── */
-        #data-panel {{
-            position: absolute; top: 96px; left: 248px; z-index: 10;
-            background: linear-gradient(135deg, rgba(0,8,20,0.92) 0%, rgba(0,15,35,0.92) 100%);
-            border: 1px solid rgba(255,255,255,0.07); border-radius: 10px;
-            padding: 10px 12px; width: 210px;
-            backdrop-filter: blur(20px); box-shadow: 0 4px 24px rgba(0,0,0,0.4);
-        }}
-        #data-panel-header {{
-            font-size: 9px; color: rgba(0,180,255,0.8); font-weight: 600;
-            letter-spacing: 2px; text-transform: uppercase;
-            margin-bottom: 8px; padding-bottom: 5px;
-            border-bottom: 1px solid rgba(0,180,255,0.2);
-            cursor: pointer; user-select: none;
-        }}
-        #data-panel-body {{ transition: opacity 0.2s; }}
-
-        /* ── LIVE INDICATOR ── */
-        #live-dot {{
-            --dot-color: #00FF88;
-            display: inline-block; width: 8px; height: 8px;
-            background: var(--dot-color);
-            border-radius: 50%; margin-right: 6px;
-            box-shadow: 0 0 8px var(--dot-color);
-            animation: pulse-dot 1.5s ease-in-out infinite;
-            transition: background 0.8s ease, box-shadow 0.8s ease;
-        }}
-        @keyframes pulse-dot {{
-            0%, 100% {{ opacity: 1; }}
-            50% {{ opacity: 0.35; }}
-        }}
-
-        /* ── STAT CARDS ── */
-        #stats {{
-            position: absolute; top: 96px; left: 16px; z-index: 10;
-            display: grid; grid-template-columns: 1fr 1fr; gap: 6px;
-            width: 220px;
-        }}
-        .stat-card {{
-            background: linear-gradient(135deg, rgba(0,8,20,0.92) 0%, rgba(0,15,35,0.92) 100%);
-            border-radius: 8px; padding: 8px 10px;
-            border: 1px solid rgba(255,255,255,0.07);
-            backdrop-filter: blur(20px);
-            position: relative; overflow: hidden;
-            transition: border-color 0.3s, box-shadow 0.3s, transform 0.2s;
-            cursor: pointer;
-        }}
-        .stat-card:hover {{
-            border-color: rgba(0,180,255,0.35);
-            box-shadow: 0 0 16px rgba(0,180,255,0.1);
-            transform: translateY(-1px);
-        }}
-        .stat-card:active {{ transform: translateY(0); }}
-        .stat-card::before {{
-            content: ''; position: absolute;
-            top: 0; left: 0; right: 0; height: 1px;
-            background: linear-gradient(90deg, transparent, var(--accent, rgba(0,180,255,0.5)), transparent);
-        }}
-        .stat-card::after {{
-            content: ''; position: absolute;
-            top: 0; left: 0; bottom: 0; width: 2px;
-            background: var(--accent, rgba(0,180,255,0.5));
-            border-radius: 2px 0 0 2px;
-        }}
-        .stat-value {{
-            font-size: 20px; font-weight: 700; line-height: 1;
-            font-variant-numeric: tabular-nums;
-        }}
-        .stat-label {{ font-size: 8px; color: rgba(255,255,255,0.4); margin-top: 3px; letter-spacing: 1px; text-transform: uppercase; }}
-        .stat-icon {{ display: none; }}
-
-        /* ── LEGEND ── */
-        #legend-wrap {{
-            position: absolute; bottom: 20px; left: 16px; z-index: 10;
-        }}
-        #legend-toggle {{
-            display: flex; align-items: center; gap: 8px;
-            background: linear-gradient(135deg, rgba(0,8,20,0.92), rgba(0,15,35,0.92));
-            border: 1px solid rgba(255,255,255,0.07); border-radius: 8px;
-            padding: 7px 12px; cursor: pointer; font-size: 10px;
-            color: rgba(0,180,255,0.8); letter-spacing: 1.5px; text-transform: uppercase; font-weight: 600;
-            backdrop-filter: blur(20px); user-select: none;
-            transition: border-color 0.2s;
-        }}
-        #legend-toggle:hover {{ border-color: rgba(0,180,255,0.4); }}
-        #legend-toggle-arrow {{ font-size: 8px; transition: transform 0.3s; }}
-        #legend {{
-            background: linear-gradient(135deg, rgba(0,8,20,0.94) 0%, rgba(0,15,35,0.94) 100%);
-            border-radius: 0 8px 8px 8px; padding: 12px 14px;
-            border: 1px solid rgba(255,255,255,0.07); border-top: none;
-            backdrop-filter: blur(20px); font-size: 10.5px;
-            display: grid; grid-template-columns: 1fr 1fr;
-            gap: 0 18px;
-            box-shadow: 0 8px 24px rgba(0,0,0,0.5);
-            max-height: 400px;
-            overflow: hidden;
-            transition: max-height 0.35s ease, padding 0.35s ease;
-        }}
-        #legend.collapsed {{ max-height: 0; padding-top: 0; padding-bottom: 0; border: none; }}
-        .legend-section {{ margin-bottom: 4px; }}
-        .legend-title {{
-            font-size: 8px; color: rgba(0,180,255,0.75); font-weight: 600;
-            letter-spacing: 1.5px; text-transform: uppercase; margin: 8px 0 5px 0;
-        }}
-        .legend-title:first-child {{ margin-top: 0; }}
-        .legend-item {{ display: flex; align-items: center; gap: 7px; margin: 3px 0; color: rgba(255,255,255,0.65); }}
-        .legend-dot {{
-            width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
-            box-shadow: 0 0 5px currentColor;
-        }}
-        .legend-box {{
-            width: 12px; height: 8px; border-radius: 2px; flex-shrink: 0;
-            box-shadow: 0 0 5px currentColor;
-        }}
-
-        /* ── POPUP ── */
+        #legend.collapsed {{ display: none !important; }}
         #popup {{
             position: absolute; z-index: 20;
             background: linear-gradient(135deg, rgba(0,8,20,0.98) 0%, rgba(0,20,40,0.98) 100%);
-            border: 1px solid rgba(0,180,255,0.3);
-            border-radius: 12px; padding: 16px 18px;
+            border: 1px solid rgba(88,191,255,0.3); padding: 16px 18px;
             font-size: 12px; min-width: 220px; max-width: 280px;
             backdrop-filter: blur(20px); display: none;
-            box-shadow: 0 0 40px rgba(0,0,0,0.6), 0 0 20px rgba(0,180,255,0.1);
+            box-shadow: 0 0 40px rgba(0,0,0,0.6), 0 0 20px rgba(88,191,255,0.1);
             animation: popup-in 0.2s ease-out;
         }}
         @keyframes popup-in {{
             from {{ opacity: 0; transform: scale(0.95) translateY(4px); }}
             to {{ opacity: 1; transform: scale(1) translateY(0); }}
         }}
-        #popup-header {{
-            display: flex; justify-content: space-between; align-items: flex-start;
-            margin-bottom: 12px; padding-bottom: 10px;
-            border-bottom: 1px solid rgba(255,255,255,0.08);
-        }}
-        #popup-title {{
-            font-size: 13px; font-weight: 700; color: white; margin: 0;
-            letter-spacing: 0.5px;
-        }}
-        #close-popup {{
-            cursor: pointer; color: rgba(255,255,255,0.3); font-size: 18px; line-height: 1;
-            transition: color 0.2s; margin-left: 10px; flex-shrink: 0;
-        }}
+        #popup-header {{ display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid rgba(255,255,255,0.08); }}
+        #popup-title {{ font-size: 13px; font-weight: 700; color: white; margin: 0; }}
+        #close-popup {{ cursor: pointer; color: rgba(255,255,255,0.3); font-size: 18px; line-height: 1; transition: color 0.2s; margin-left: 10px; }}
         #close-popup:hover {{ color: white; }}
-        .popup-row {{
-            display: flex; justify-content: space-between; align-items: center;
-            padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.04);
-        }}
+        .popup-row {{ display: flex; justify-content: space-between; align-items: center; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.04); }}
         .popup-key {{ color: rgba(255,255,255,0.4); font-size: 10px; letter-spacing: 1px; text-transform: uppercase; }}
         .popup-val {{ color: white; font-weight: 600; font-size: 12px; }}
-
-        /* ── MAPBOX CONTROLS ── */
-        .mapboxgl-ctrl-group {{
-            background: linear-gradient(135deg, rgba(0,8,20,0.92), rgba(0,15,35,0.92)) !important;
-            border: 1px solid rgba(255,255,255,0.07) !important;
-            border-radius: 8px !important;
-            backdrop-filter: blur(20px) !important;
-        }}
+        .mapboxgl-ctrl-group {{ background: rgba(11,27,42,0.92) !important; border: 1px solid rgba(88,191,255,0.15) !important; backdrop-filter: blur(20px) !important; border-radius: 0 !important; }}
         .mapboxgl-ctrl-group button {{ background: transparent !important; }}
         .mapboxgl-ctrl-group button span {{ filter: invert(1) brightness(0.7); }}
         .mapboxgl-ctrl-group button:hover span {{ filter: invert(1); }}
         .mapboxgl-ctrl-attrib {{ display: none !important; }}
-
-        /* ── ADDRESS SEARCH ── */
-        #address-panel {{
-            position: absolute; bottom: 20px; right: 16px; z-index: 10;
-            background: linear-gradient(135deg, rgba(0,8,20,0.96) 0%, rgba(0,20,40,0.96) 100%);
-            border: 1px solid rgba(0,180,255,0.25); border-radius: 10px;
-            padding: 12px 14px; width: 270px;
-            backdrop-filter: blur(20px);
-            box-shadow: 0 4px 24px rgba(0,0,0,0.5);
-        }}
-        #address-panel h4 {{
-            font-size: 9px; color: rgba(0,180,255,0.75); font-weight: 600;
-            letter-spacing: 2px; text-transform: uppercase;
-            margin-bottom: 8px; border-bottom: 1px solid rgba(0,180,255,0.15);
-            padding-bottom: 5px;
-        }}
-        #address-input {{
-            width: 100%; padding: 8px 10px; border-radius: 6px;
-            background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
-            color: white; font-size: 12px; font-family: 'Inter', Arial, sans-serif;
-            outline: none; transition: border-color 0.2s;
-        }}
-        #address-input:focus {{ border-color: rgba(0,180,255,0.5); }}
-        #address-input::placeholder {{ color: rgba(255,255,255,0.3); }}
-        #buffer-row {{
-            display: flex; gap: 8px; margin-top: 8px; align-items: center;
-        }}
-        #buffer-slider {{
-            flex: 1; accent-color: #00B4FF;
-        }}
-        #buffer-label {{
-            font-size: 11px; color: rgba(0,180,255,0.8);
-            min-width: 55px; text-align: right;
-        }}
-        #search-btn {{
-            width: 100%; margin-top: 10px; padding: 8px;
-            background: linear-gradient(135deg, rgba(0,100,200,0.6), rgba(0,50,150,0.6));
-            border: 1px solid rgba(0,180,255,0.4); border-radius: 6px;
-            color: white; font-size: 11px; font-weight: 600;
-            letter-spacing: 1px; text-transform: uppercase;
-            cursor: pointer; transition: all 0.2s;
-        }}
-        #search-btn:hover {{ background: linear-gradient(135deg, rgba(0,120,220,0.8), rgba(0,70,180,0.8)); }}
-        #threat-results {{
-            margin-top: 12px; max-height: 200px; overflow-y: auto;
-            display: none;
-        }}
-        .threat-item {{
-            padding: 7px 10px; margin: 4px 0; border-radius: 6px;
-            font-size: 11px; border-left: 3px solid;
-            background: rgba(255,255,255,0.03);
-            transition: background 0.2s;
-        }}
-        .threat-item:hover {{ background: rgba(255,255,255,0.06); }}
-        .threat-none {{
-            color: rgba(0,255,100,0.8); border-color: #00FF64;
-            text-align: center; padding: 10px;
-        }}
-        #clear-search {{
-            font-size: 10px; color: rgba(255,255,255,0.3); cursor: pointer;
-            text-align: center; margin-top: 8px; display: none;
-        }}
-        #clear-search:hover {{ color: white; }}
-
-        /* ── NRI PANEL ── */
-        .nri-section {{
-            margin-top: 10px; padding-top: 8px;
-            border-top: 1px solid rgba(255,255,255,0.06);
-        }}
-        .nri-title {{
-            font-size: 9px; color: rgba(0,180,255,0.7);
-            letter-spacing: 2px; text-transform: uppercase;
-            margin-bottom: 8px;
-        }}
-        .nri-score-row {{
-            display: flex; justify-content: space-between;
-            align-items: center; margin: 5px 0;
-            padding: 5px 8px; border-radius: 5px;
-            background: rgba(255,255,255,0.03);
-        }}
-        .nri-label {{ font-size: 10px; color: rgba(255,255,255,0.5); }}
-        .nri-value {{ font-weight: 700; font-size: 12px; }}
-        .nri-bar-wrap {{
-            height: 3px; background: rgba(255,255,255,0.1);
-            border-radius: 2px; margin-top: 3px; overflow: hidden;
-        }}
-        .nri-bar {{ height: 100%; border-radius: 2px; transition: width 0.8s ease; }}
-        .nri-hazards {{
-            display: grid; grid-template-columns: 1fr 1fr;
-            gap: 4px; margin-top: 6px;
-        }}
-        .nri-hazard-item {{
-            padding: 4px 6px; border-radius: 4px;
-            background: rgba(255,255,255,0.03);
-            border-left: 2px solid;
-        }}
-        .nri-hazard-name {{ font-size: 9px; color: rgba(255,255,255,0.4); }}
-        .nri-hazard-val {{ font-size: 11px; font-weight: 600; }}
-
-        /* ── CORNER DECORATIONS ── */
-        .corner {{
-            position: absolute; width: 20px; height: 20px; z-index: 6;
-            border-color: rgba(0,180,255,0.4);
-            border-style: solid;
-        }}
-        .corner-tl {{ top: 10px; left: 10px; border-width: 2px 0 0 2px; }}
-        .corner-tr {{ top: 10px; right: 10px; border-width: 2px 2px 0 0; }}
-        .corner-bl {{ bottom: 10px; left: 10px; border-width: 0 0 2px 2px; }}
-        .corner-br {{ bottom: 10px; right: 10px; border-width: 0 2px 2px 0; }}
-
-        /* ── SCROLLBAR ── */
-        ::-webkit-scrollbar {{ width: 4px; }}
-        ::-webkit-scrollbar-track {{ background: rgba(0,0,0,0.2); }}
-        ::-webkit-scrollbar-thumb {{ background: rgba(0,180,255,0.3); border-radius: 2px; }}
-
-        /* ── HOVER TOOLTIP ── */
         #hover-tooltip {{
             position: absolute; z-index: 15; pointer-events: none;
-            background: linear-gradient(135deg, rgba(0,8,20,0.96), rgba(0,20,40,0.96));
-            border: 1px solid rgba(0,180,255,0.3); border-radius: 7px;
-            padding: 7px 12px; font-size: 11px;
-            backdrop-filter: blur(16px); display: none;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.6);
-            white-space: nowrap; line-height: 1.6;
+            background: rgba(11,27,42,0.96); border: 1px solid rgba(88,191,255,0.3);
+            padding: 7px 12px; font-size: 11px; backdrop-filter: blur(16px);
+            display: none; box-shadow: 0 4px 20px rgba(0,0,0,0.6);
+            white-space: nowrap; line-height: 1.6; color: #dde9fb;
+        }}
+        ::-webkit-scrollbar {{ width: 4px; }}
+        ::-webkit-scrollbar-track {{ background: rgba(0,0,0,0.2); }}
+        ::-webkit-scrollbar-thumb {{ background: rgba(88,191,255,0.3); border-radius: 2px; }}
+        .threat-item {{ padding: 7px 10px; margin: 4px 0; background: rgba(88,191,255,0.05); border-left: 3px solid; font-size: 11px; }}
+        .nri-section {{ margin-top: 10px; padding-top: 8px; border-top: 1px solid rgba(88,191,255,0.1); }}
+        .nri-row {{ display: flex; justify-content: space-between; font-size: 10px; padding: 2px 0; }}
+        .nri-label {{ color: rgba(160,172,189,0.8); }}
+        .nri-val {{ font-weight: 600; }}
+        #address-input:focus {{ border-bottom-color: #58bfff !important; outline: none; }}
+        @media (max-width: 768px) {{
+            nav.sidebar {{ display: none; }}
+            #address-panel {{ width: calc(100vw - 32px) !important; right: 16px !important; bottom: auto !important; top: 70px !important; }}
+            #legend-wrap {{ display: none !important; }}
         }}
 
-        /* ── MOBILE RESPONSIVE ── */
-        @media (max-width: 768px) {{
-            #stats {{ top: auto; left: 0; right: 0; bottom: 0; grid-template-columns: repeat(3, 1fr);
-                gap: 4px; padding: 8px;
-                background: linear-gradient(0deg, rgba(0,5,15,0.97), transparent);
-                width: 100%; }}
-            .stat-card {{ padding: 6px 8px; }}
-            .stat-value {{ font-size: 16px; }}
-            #header {{ top: 10px; padding: 8px 14px; }}
-            #header h1 {{ font-size: 12px; letter-spacing: 1px; }}
-            #address-panel {{ width: calc(100vw - 32px); bottom: auto; top: 76px; right: 16px; display: none; }}
-            #legend-wrap {{ display: none; }}
-            .corner {{ display: none; }}
-        }}
     </style>
 </head>
-<body>
+<body class="bg-background text-on-surface overflow-hidden select-none">
 
 <div id="map"></div>
 
-<!-- Corner decorations -->
-<div class="corner corner-tl"></div>
-<div class="corner corner-tr"></div>
-<div class="corner corner-bl"></div>
-<div class="corner corner-br"></div>
+<!-- Viewport corner brackets -->
+<div class="fixed top-4 left-4 w-6 h-6 border-t-2 border-l-2 border-primary/40 z-50 pointer-events-none"></div>
+<div class="fixed top-4 right-4 w-6 h-6 border-t-2 border-r-2 border-primary/40 z-50 pointer-events-none"></div>
+<div class="fixed bottom-4 left-4 w-6 h-6 border-b-2 border-l-2 border-primary/40 z-50 pointer-events-none"></div>
+<div class="fixed bottom-4 right-4 w-6 h-6 border-b-2 border-r-2 border-primary/40 z-50 pointer-events-none"></div>
 
-<!-- Header -->
-<div id="header">
-    <h1><span id="live-dot"></span>National All-Hazards Monitor</h1>
-    <p id="update-time">ACQUIRING LIVE DATA...</p>
-    <button id="sitrep-btn" onclick="openSitrep()">⚡ AI SITUATION REPORT</button>
-</div>
+<!-- Sidebar nav -->
+<nav class="sidebar fixed left-0 top-0 h-full z-40 flex flex-col items-center py-8 bg-slate-950/80 backdrop-blur-2xl border-r border-primary/10 w-20">
+    <div class="mb-10 flex flex-col items-center">
+        <span class="text-primary font-bold text-xs" style="font-family:'Space Grotesk',sans-serif;">M.C.</span>
+        <div class="w-8 h-8 mt-2 bg-primary/20 flex items-center justify-center">
+            <span class="material-symbols-outlined text-primary" style="font-size:20px;">radar</span>
+        </div>
+    </div>
+    <div class="flex flex-col gap-6 flex-1">
+        <button onclick="toggleLayerPanel()" class="flex flex-col items-center gap-1 border-l-4 border-primary bg-primary/10 text-primary py-2 w-20 transition-all" title="Layers">
+            <span class="material-symbols-outlined">layers</span>
+            <span style="font-size:9px;font-weight:700;letter-spacing:2px;">LAYERS</span>
+        </button>
+        <button onclick="flyToEarthquakes()" class="flex flex-col items-center gap-1 text-slate-500 hover:bg-slate-800/50 hover:text-primary py-2 w-20 transition-all" title="Seismic">
+            <span class="material-symbols-outlined">tsunami</span>
+            <span style="font-size:9px;font-weight:700;letter-spacing:2px;">SEISMIC</span>
+        </button>
+        <button onclick="flyToFires()" class="flex flex-col items-center gap-1 text-slate-500 hover:bg-slate-800/50 hover:text-primary py-2 w-20 transition-all" title="Thermal">
+            <span class="material-symbols-outlined">local_fire_department</span>
+            <span style="font-size:9px;font-weight:700;letter-spacing:2px;">THERMAL</span>
+        </button>
+        <button onclick="flyToWarnings()" class="flex flex-col items-center gap-1 text-slate-500 hover:bg-slate-800/50 hover:text-primary py-2 w-20 transition-all" title="Atmospheric">
+            <span class="material-symbols-outlined">cyclone</span>
+            <span style="font-size:9px;font-weight:700;letter-spacing:2px;">ATMOS</span>
+        </button>
+        <button onclick="document.getElementById('address-panel').scrollIntoView()" class="flex flex-col items-center gap-1 text-slate-500 hover:bg-slate-800/50 hover:text-primary py-2 w-20 transition-all" title="Risk">
+            <span class="material-symbols-outlined">warning</span>
+            <span style="font-size:9px;font-weight:700;letter-spacing:2px;">RISK</span>
+        </button>
+    </div>
+    <button onclick="document.documentElement.requestFullscreen?.()" class="flex flex-col items-center gap-1 text-slate-500 hover:bg-slate-800/50 hover:text-primary py-2 w-20 transition-all mt-auto" title="Fullscreen">
+        <span class="material-symbols-outlined">fullscreen</span>
+        <span style="font-size:9px;font-weight:700;letter-spacing:2px;">EXPAND</span>
+    </button>
+</nav>
+
+<!-- Top Header -->
+<header class="fixed top-0 left-1/2 -translate-x-1/2 z-50 flex items-center gap-6 bg-slate-900/60 backdrop-blur-xl mt-3 w-fit border border-primary/20 px-6 py-2" style="box-shadow:0 0 15px rgba(88,191,255,0.1);">
+    <div class="flex items-center gap-3">
+        <div class="w-2.5 h-2.5 bg-error rounded-full live-pulse"></div>
+        <div class="flex flex-col">
+            <h1 style="font-family:'Space Grotesk',sans-serif;font-size:13px;font-weight:700;letter-spacing:3px;color:#58bfff;text-transform:uppercase;">National All-Hazards Monitor</h1>
+            <p id="update-time" style="font-size:9px;color:#a0acbd;letter-spacing:2px;font-weight:700;text-transform:uppercase;margin-top:2px;">ACQUIRING LIVE DATA...</p>
+        </div>
+    </div>
+    <div style="width:1px;height:24px;background:rgba(61,73,87,0.5);"></div>
+    <nav class="flex items-center gap-5">
+        <a href="#" style="font-size:10px;font-weight:700;letter-spacing:2px;color:#58bfff;text-transform:uppercase;border-bottom:2px solid #58bfff;padding-bottom:2px;">GLOBAL</a>
+        <a href="#" style="font-size:10px;font-weight:700;letter-spacing:2px;color:#6a7686;text-transform:uppercase;">REGIONAL</a>
+        <a href="#" style="font-size:10px;font-weight:700;letter-spacing:2px;color:#6a7686;text-transform:uppercase;">ANALYTICS</a>
+    </nav>
+    <div style="width:1px;height:24px;background:rgba(61,73,87,0.5);"></div>
+    <button id="sitrep-btn" onclick="openSitrep()" class="flex items-center gap-2 bg-primary px-4 py-1.5 text-on-primary font-bold text-[10px] tracking-widest uppercase hover:bg-primary-dim transition-all" style="font-family:'Space Grotesk',sans-serif;">
+        <span class="material-symbols-outlined" style="font-size:16px;">psychology</span>
+        AI SITUATION REPORT
+    </button>
+</header>
 
 <!-- Sitrep Modal -->
 <div id="sitrep-overlay" onclick="if(event.target===this)closeSitrep()">
-    <div id="sitrep-modal">
-        <button id="sitrep-close" onclick="closeSitrep()">✕</button>
-        <h3>⚡ AI Situation Report</h3>
-        <div id="sitrep-body"><p style="color:rgba(255,255,255,0.4)">Generating report...</p></div>
-        <div id="sitrep-footer">
-            <button class="sitrep-action-btn" onclick="copySitrep()">📋 Copy to Clipboard</button>
-            <span id="sitrep-copy-feedback"></span>
+    <div class="relative w-full bg-surface-variant/60 backdrop-blur-xl border border-outline-variant/20 shadow-2xl flex flex-col overflow-hidden" style="max-width:56rem;">
+        <div class="corner-bracket corner-tl"></div>
+        <div class="corner-bracket corner-tr"></div>
+        <div class="corner-bracket corner-bl"></div>
+        <div class="corner-bracket corner-br"></div>
+        <header class="p-6 flex items-center justify-between" style="border-bottom:1px solid rgba(61,73,87,0.2);">
+            <div class="flex items-center gap-3">
+                <span class="material-symbols-outlined text-primary" style="font-variation-settings:'FILL' 1;font-size:24px;">bolt</span>
+                <h1 style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:20px;color:#dde9fb;">AI Situation Report</h1>
+            </div>
+            <div class="flex items-center gap-4">
+                <div class="flex items-center gap-2">
+                    <div class="w-2 h-2 bg-primary rounded-full" style="animation:pulse 2s infinite;box-shadow:0 0 8px #58bfff;"></div>
+                    <span style="font-size:9px;font-weight:700;letter-spacing:2px;color:#a0acbd;text-transform:uppercase;">LIVE INTELLIGENCE FEED</span>
+                </div>
+            </div>
+        </header>
+        <div class="flex flex-col md:flex-row" style="min-height:320px;">
+            <div class="flex-1 p-8 flex flex-col gap-8" style="background:rgba(6,20,34,0.3);border-right:1px solid rgba(61,73,87,0.2);">
+                <section class="flex items-baseline justify-between">
+                    <div>
+                        <span style="display:block;font-size:9px;font-weight:700;letter-spacing:2px;color:#a0acbd;text-transform:uppercase;margin-bottom:4px;">NATIONAL THREAT LEVEL</span>
+                        <div class="flex items-baseline gap-2">
+                            <span id="sitrep-level" style="font-family:'Space Grotesk',sans-serif;font-size:64px;font-weight:700;line-height:1;color:#FF8C00;">—</span>
+                            <span style="font-family:'Space Grotesk',sans-serif;font-size:28px;font-weight:700;color:#a0acbd;">/10</span>
+                        </div>
+                    </div>
+                    <div class="text-right">
+                        <span style="display:block;font-size:9px;font-weight:700;letter-spacing:2px;color:#a0acbd;text-transform:uppercase;margin-bottom:4px;">STATUS</span>
+                        <span id="sitrep-status-badge" style="display:inline-block;padding:4px 12px;border:1px solid rgba(255,113,108,0.3);background:rgba(159,5,25,0.15);color:#ff716c;font-weight:700;font-size:11px;letter-spacing:1px;">ANALYZING...</span>
+                    </div>
+                </section>
+                <section>
+                    <span style="display:block;font-size:9px;font-weight:700;letter-spacing:2px;color:#a0acbd;text-transform:uppercase;margin-bottom:10px;">SITUATION SUMMARY</span>
+                    <p id="sitrep-summary" style="font-size:14px;line-height:1.7;color:#dde9fb;font-weight:300;">Generating report...</p>
+                </section>
+                <section>
+                    <span style="display:block;font-size:9px;font-weight:700;letter-spacing:2px;color:#a0acbd;text-transform:uppercase;margin-bottom:12px;">PRIORITY THREATS</span>
+                    <div id="sitrep-threats" class="flex flex-col gap-3">
+                        <p style="color:#a0acbd;font-size:13px;">Analyzing threats...</p>
+                    </div>
+                </section>
+            </div>
+            <div style="width:320px;flex-shrink:0;padding:32px;background:rgba(0,0,0,0.15);">
+                <span style="display:block;font-size:9px;font-weight:700;letter-spacing:2px;color:#a0acbd;text-transform:uppercase;margin-bottom:20px;">COMMAND ACTIONS</span>
+                <div id="sitrep-actions" class="flex flex-col gap-5">
+                    <p style="color:#a0acbd;font-size:11px;">Processing...</p>
+                </div>
+                <div style="margin-top:40px;padding:14px;background:#102131;border:1px solid rgba(61,73,87,0.3);position:relative;">
+                    <span style="font-size:9px;font-weight:700;color:#a0acbd;letter-spacing:3px;text-transform:uppercase;">AI LOG_PROCESSOR</span>
+                    <div id="sitrep-confidence" style="margin-top:6px;font-family:monospace;font-size:10px;color:rgba(88,191,255,0.8);line-height:1.8;">
+                        <p>&gt; AWAITING_DATA...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <footer style="padding:20px 24px;background:rgba(16,33,49,0.5);border-top:1px solid rgba(61,73,87,0.2);display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;">
+            <div class="flex items-center gap-5" style="font-size:9px;font-weight:700;letter-spacing:2px;color:#a0acbd;text-transform:uppercase;">
+                <span class="flex items-center gap-1"><span class="material-symbols-outlined" style="font-size:13px;">history</span> REF: SITREP-AI</span>
+                <span class="flex items-center gap-1"><span class="material-symbols-outlined" style="font-size:13px;">database</span> SOURCE: GROQ-LLM</span>
+            </div>
+            <div class="flex gap-3">
+                <button onclick="copySitrep()" class="flex items-center gap-2 border border-primary/30 text-primary px-5 py-2 text-xs font-bold tracking-widest uppercase hover:bg-primary/5 hover:border-primary transition-all" style="background:transparent;">
+                    <span class="material-symbols-outlined" style="font-size:14px;">content_copy</span>
+                    Copy <span id="sitrep-copy-feedback" style="color:#00CC66;font-size:10px;"></span>
+                </button>
+                <button onclick="closeSitrep()" class="flex items-center gap-2 bg-primary text-on-primary px-6 py-2 text-xs font-bold tracking-widest uppercase hover:bg-primary-dim transition-all">
+                    Close
+                </button>
+            </div>
+        </footer>
+    </div>
+</div>
+
+<!-- Stat Cards + Hazard Chart (top-left) -->
+<div class="absolute z-10 pointer-events-auto" style="left:96px;top:72px;width:370px;">
+    <div class="grid grid-cols-2 gap-3">
+        <div class="glass-panel p-3 border-l-2 border-error/60 relative cursor-pointer hover:bg-primary/5 transition-all">
+            <span style="font-size:9px;color:#a0acbd;font-weight:700;letter-spacing:2px;text-transform:uppercase;">Active Warnings</span>
+            <div class="flex items-baseline gap-2 mt-1">
+                <span id="stat-warnings" style="font-family:'Space Grotesk',sans-serif;font-size:26px;font-weight:700;color:#dde9fb;">—</span>
+            </div>
+        </div>
+        <div class="glass-panel p-3 border-l-2 border-primary/60 relative cursor-pointer hover:bg-primary/5 transition-all">
+            <span style="font-size:9px;color:#a0acbd;font-weight:700;letter-spacing:2px;text-transform:uppercase;">Seismic M2.5+</span>
+            <div class="flex items-baseline gap-2 mt-1">
+                <span id="stat-eq" style="font-family:'Space Grotesk',sans-serif;font-size:26px;font-weight:700;color:#dde9fb;">—</span>
+            </div>
+        </div>
+        <div class="glass-panel p-3 border-l-2 border-orange-500/60 relative cursor-pointer hover:bg-primary/5 transition-all">
+            <span style="font-size:9px;color:#a0acbd;font-weight:700;letter-spacing:2px;text-transform:uppercase;">Thermal Sites</span>
+            <div class="flex items-baseline gap-2 mt-1">
+                <span id="stat-fires" style="font-family:'Space Grotesk',sans-serif;font-size:26px;font-weight:700;color:#dde9fb;">—</span>
+            </div>
+        </div>
+        <div class="glass-panel p-3 border-l-2 border-tertiary/60 relative cursor-pointer hover:bg-primary/5 transition-all">
+            <span style="font-size:9px;color:#a0acbd;font-weight:700;letter-spacing:2px;text-transform:uppercase;">SPC Outlook</span>
+            <div class="flex items-baseline gap-2 mt-1">
+                <span id="stat-spc" style="font-family:'Space Grotesk',sans-serif;font-size:26px;font-weight:700;color:#dde9fb;">—</span>
+            </div>
+        </div>
+        <div class="glass-panel p-3 border-l-2 border-amber-500/60 relative cursor-pointer hover:bg-primary/5 transition-all">
+            <span style="font-size:9px;color:#a0acbd;font-weight:700;letter-spacing:2px;text-transform:uppercase;">Counties Alert</span>
+            <div class="flex items-baseline gap-2 mt-1">
+                <span id="stat-counties" style="font-family:'Space Grotesk',sans-serif;font-size:26px;font-weight:700;color:#dde9fb;">—</span>
+            </div>
+        </div>
+        <div class="glass-panel p-3 border-l-2 border-primary/30 relative cursor-pointer hover:bg-primary/5 transition-all">
+            <span style="font-size:9px;color:#a0acbd;font-weight:700;letter-spacing:2px;text-transform:uppercase;">Population Exp.</span>
+            <div class="flex items-baseline gap-2 mt-1">
+                <span id="stat-pop" style="font-family:'Space Grotesk',sans-serif;font-size:26px;font-weight:700;color:#dde9fb;">—</span>
+            </div>
         </div>
     </div>
-</div>
-
-<!-- Data Panel -->
-<div id="data-panel">
-    <div id="data-panel-header" onclick="toggleDataPanel()">HAZARD OVERVIEW ▾</div>
-    <div id="data-panel-body">
-        <canvas id="hazard-chart" height="130"></canvas>
+    <div class="glass-panel mt-3 p-4" style="position:relative;">
+        <div class="corner-bracket corner-tl"></div>
+        <div class="corner-bracket corner-br"></div>
+        <div class="flex justify-between items-center mb-3">
+            <h3 style="font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#dde9fb;">Hazard Overview</h3>
+            <span class="material-symbols-outlined text-primary" style="font-size:16px;">equalizer</span>
+        </div>
+        <canvas id="hazard-chart" height="110"></canvas>
     </div>
 </div>
 
-<!-- Stat Cards -->
-<div id="stats">
-    <div class="stat-card" style="--accent: rgba(255,80,80,0.6)">
-        <div class="stat-value" id="stat-warnings" style="color:#FF5050">—</div>
-        <div class="stat-label">Active Warnings</div>
-        <div class="stat-icon">⚠</div>
+<!-- Legend (collapsible, bottom-left) -->
+<div id="legend-wrap" class="absolute z-10 pointer-events-auto" style="bottom:24px;left:96px;">
+    <div id="legend-toggle" onclick="toggleLegend()" class="glass-panel px-4 py-2 flex items-center justify-between cursor-pointer" style="min-width:140px;gap:16px;">
+        <span style="font-size:9px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#58bfff;">MAP LEGEND</span>
+        <span id="legend-toggle-arrow" style="font-size:10px;display:inline-block;transform:rotate(180deg);transition:transform 0.2s;color:#58bfff;">▲</span>
     </div>
-    <div class="stat-card" style="--accent: rgba(0,180,255,0.6)">
-        <div class="stat-value" id="stat-eq" style="color:#00B4FF">—</div>
-        <div class="stat-label">Earthquakes M2.5+</div>
-        <div class="stat-icon">🔴</div>
-    </div>
-    <div class="stat-card" style="--accent: rgba(255,80,0,0.6)">
-        <div class="stat-value" id="stat-fires" style="color:#FF5000">—</div>
-        <div class="stat-label">Fire Detections</div>
-        <div class="stat-icon">🔥</div>
-    </div>
-    <div class="stat-card" style="--accent: rgba(0,255,120,0.6)">
-        <div class="stat-value" id="stat-spc" style="color:#00FF78">—</div>
-        <div class="stat-label">SPC Outlook Zones</div>
-        <div class="stat-icon">⛈</div>
-    </div>
-    <div class="stat-card" style="--accent: rgba(255,150,0,0.6)">
-        <div class="stat-value" id="stat-counties" style="color:#FF9600">—</div>
-        <div class="stat-label">Affected Counties</div>
-        <div class="stat-icon">📍</div>
-    </div>
-    <div class="stat-card" style="--accent: rgba(200,100,255,0.6)">
-        <div class="stat-value" id="stat-pop" style="color:#CC64FF">—</div>
-        <div class="stat-label">Population at Risk</div>
-        <div class="stat-icon">👥</div>
-    </div>
-</div>
-
-<!-- Legend (collapsible) -->
-<div id="legend-wrap">
-    <div id="legend-toggle" onclick="toggleLegend()">
-        <span>MAP LEGEND</span>
-        <span id="legend-toggle-arrow" style="transform: rotate(180deg); display: inline-block;">▲</span>
-    </div>
-    <div id="legend" class="collapsed">
+    <div id="legend" class="collapsed glass-panel mt-1 p-4" style="display:none;grid-template-columns:repeat(3,1fr);gap:16px;max-width:500px;">
         <div>
-            <div class="legend-title">NWS Warnings</div>
-            <div class="legend-item"><div class="legend-box" style="background:#FF0000"></div>Tornado</div>
-            <div class="legend-item"><div class="legend-box" style="background:#FF6600"></div>Hurricane</div>
-            <div class="legend-item"><div class="legend-box" style="background:#FF6666"></div>Svr T-Storm</div>
-            <div class="legend-item"><div class="legend-box" style="background:#00BFFF"></div>Flash Flood</div>
-            <div class="legend-item"><div class="legend-box" style="background:#AAAAFF"></div>Winter Storm</div>
-            <div class="legend-title">SPC Outlook</div>
-            <div class="legend-item"><div class="legend-box" style="background:#76FF7A"></div>Thunder</div>
-            <div class="legend-item"><div class="legend-box" style="background:#FFFF00"></div>Slight Risk</div>
-            <div class="legend-item"><div class="legend-box" style="background:#FF9900"></div>Enhanced</div>
-            <div class="legend-item"><div class="legend-box" style="background:#FF0000"></div>Moderate/High</div>
-            <div class="legend-title">Earthquakes</div>
-            <div class="legend-item"><div class="legend-dot" style="background:#FFFF00"></div>M2.5–3.9</div>
-            <div class="legend-item"><div class="legend-dot" style="background:#FF9900"></div>M4.0–4.9</div>
-            <div class="legend-item"><div class="legend-dot" style="background:#FF0000"></div>M5.0+</div>
+            <div style="font-size:9px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#a0acbd;margin-bottom:8px;">NWS Warnings</div>
+            <div style="display:flex;align-items:center;gap:6px;font-size:10px;margin-bottom:4px;"><div style="width:10px;height:7px;background:#FF0000;flex-shrink:0;"></div>Tornado</div>
+            <div style="display:flex;align-items:center;gap:6px;font-size:10px;margin-bottom:4px;"><div style="width:10px;height:7px;background:#FF6600;flex-shrink:0;"></div>Hurricane</div>
+            <div style="display:flex;align-items:center;gap:6px;font-size:10px;margin-bottom:4px;"><div style="width:10px;height:7px;background:#FF6666;flex-shrink:0;"></div>Svr T-Storm</div>
+            <div style="display:flex;align-items:center;gap:6px;font-size:10px;margin-bottom:4px;"><div style="width:10px;height:7px;background:#00BFFF;flex-shrink:0;"></div>Flash Flood</div>
+            <div style="display:flex;align-items:center;gap:6px;font-size:10px;margin-bottom:8px;"><div style="width:10px;height:7px;background:#AAAAFF;flex-shrink:0;"></div>Winter Storm</div>
+            <div style="font-size:9px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#a0acbd;margin-bottom:8px;">Earthquakes</div>
+            <div style="display:flex;align-items:center;gap:6px;font-size:10px;margin-bottom:4px;"><div style="width:8px;height:8px;border-radius:50%;background:#FFFF00;flex-shrink:0;"></div>M2.5–3.9</div>
+            <div style="display:flex;align-items:center;gap:6px;font-size:10px;margin-bottom:4px;"><div style="width:8px;height:8px;border-radius:50%;background:#FF9900;flex-shrink:0;"></div>M4.0–4.9</div>
+            <div style="display:flex;align-items:center;gap:6px;font-size:10px;"><div style="width:8px;height:8px;border-radius:50%;background:#FF0000;flex-shrink:0;"></div>M5.0+</div>
         </div>
         <div>
-            <div class="legend-title">Wildfires</div>
-            <div class="legend-item"><div class="legend-dot" style="background:#FF4500"></div>FIRMS Detection</div>
-            <div class="legend-item"><div class="legend-box" style="background:rgba(255,69,0,0.5);border:1px solid #FF4500"></div>Perimeter</div>
-            <div class="legend-title">Air Quality (AQI)</div>
-            <div class="legend-item"><div class="legend-dot" style="background:#00E400"></div>Good (0–50)</div>
-            <div class="legend-item"><div class="legend-dot" style="background:#FFFF00"></div>Moderate (51–100)</div>
-            <div class="legend-item"><div class="legend-dot" style="background:#FF7E00"></div>Unhealthy/Sens (101–150)</div>
-            <div class="legend-item"><div class="legend-dot" style="background:#FF0000"></div>Unhealthy (151–200)</div>
-            <div class="legend-item"><div class="legend-dot" style="background:#8F3F97"></div>Very Unhealthy (201+)</div>
-            <div class="legend-title">Flood Gauges</div>
-            <div class="legend-item"><div class="legend-dot" style="background:#FFFF00"></div>Action Stage</div>
-            <div class="legend-item"><div class="legend-dot" style="background:#FFA500"></div>Minor Flood</div>
-            <div class="legend-item"><div class="legend-dot" style="background:#FF4500"></div>Moderate Flood</div>
-            <div class="legend-item"><div class="legend-dot" style="background:#FF0000"></div>Major Flood</div>
+            <div style="font-size:9px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#a0acbd;margin-bottom:8px;">Wildfires &amp; AQ</div>
+            <div style="display:flex;align-items:center;gap:6px;font-size:10px;margin-bottom:4px;"><div style="width:8px;height:8px;border-radius:50%;background:#FF4500;flex-shrink:0;"></div>FIRMS Detection</div>
+            <div style="display:flex;align-items:center;gap:6px;font-size:10px;margin-bottom:8px;"><div style="width:10px;height:7px;background:rgba(255,69,0,0.5);border:1px solid #FF4500;flex-shrink:0;"></div>Perimeter</div>
+            <div style="display:flex;align-items:center;gap:6px;font-size:10px;margin-bottom:4px;"><div style="width:8px;height:8px;border-radius:50%;background:#00E400;flex-shrink:0;"></div>AQ Good</div>
+            <div style="display:flex;align-items:center;gap:6px;font-size:10px;margin-bottom:4px;"><div style="width:8px;height:8px;border-radius:50%;background:#FFFF00;flex-shrink:0;"></div>AQ Moderate</div>
+            <div style="display:flex;align-items:center;gap:6px;font-size:10px;margin-bottom:4px;"><div style="width:8px;height:8px;border-radius:50%;background:#FF7E00;flex-shrink:0;"></div>AQ Unhealthy/S</div>
+            <div style="display:flex;align-items:center;gap:6px;font-size:10px;margin-bottom:4px;"><div style="width:8px;height:8px;border-radius:50%;background:#FF0000;flex-shrink:0;"></div>AQ Unhealthy</div>
+            <div style="display:flex;align-items:center;gap:6px;font-size:10px;"><div style="width:8px;height:8px;border-radius:50%;background:#8F3F97;flex-shrink:0;"></div>AQ Very Unhealthy</div>
         </div>
         <div>
-            <div class="legend-title">Volcanoes</div>
-            <div class="legend-item"><div class="legend-dot" style="background:#FFFF00"></div>Advisory</div>
-            <div class="legend-item"><div class="legend-dot" style="background:#FF8800"></div>Watch</div>
-            <div class="legend-item"><div class="legend-dot" style="background:#FF0000"></div>Warning</div>
-            <div class="legend-title">Drought Monitor</div>
-            <div class="legend-item"><div class="legend-box" style="background:#F5DEB3"></div>D0 Abnormally Dry</div>
-            <div class="legend-item"><div class="legend-box" style="background:#FFD700"></div>D1 Moderate</div>
-            <div class="legend-item"><div class="legend-box" style="background:#FF8C00"></div>D2 Severe</div>
-            <div class="legend-item"><div class="legend-box" style="background:#FF2400"></div>D3 Extreme</div>
-            <div class="legend-item"><div class="legend-box" style="background:#8B0000"></div>D4 Exceptional</div>
-            <div class="legend-title">Other</div>
-            <div class="legend-item"><div class="legend-dot" style="background:#00FF88"></div>Open Shelter</div>
-            <div class="legend-item"><div class="legend-dot" style="background:#C084FC"></div>FEMA Disaster</div>
-            <div class="legend-item"><div class="legend-dot" style="background:#FF0066"></div>Hospital</div>
-            <div class="legend-item"><div class="legend-dot" style="background:#FFD700"></div>Power Plant</div>
+            <div style="font-size:9px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#a0acbd;margin-bottom:8px;">Flood &amp; Other</div>
+            <div style="display:flex;align-items:center;gap:6px;font-size:10px;margin-bottom:4px;"><div style="width:8px;height:8px;border-radius:50%;background:#FFFF00;flex-shrink:0;"></div>Action Stage</div>
+            <div style="display:flex;align-items:center;gap:6px;font-size:10px;margin-bottom:4px;"><div style="width:8px;height:8px;border-radius:50%;background:#FFA500;flex-shrink:0;"></div>Minor Flood</div>
+            <div style="display:flex;align-items:center;gap:6px;font-size:10px;margin-bottom:4px;"><div style="width:8px;height:8px;border-radius:50%;background:#FF4500;flex-shrink:0;"></div>Moderate Flood</div>
+            <div style="display:flex;align-items:center;gap:6px;font-size:10px;margin-bottom:8px;"><div style="width:8px;height:8px;border-radius:50%;background:#FF0000;flex-shrink:0;"></div>Major Flood</div>
+            <div style="display:flex;align-items:center;gap:6px;font-size:10px;margin-bottom:4px;"><div style="width:8px;height:8px;border-radius:50%;background:#00FF88;flex-shrink:0;"></div>Open Shelter</div>
+            <div style="display:flex;align-items:center;gap:6px;font-size:10px;margin-bottom:4px;"><div style="width:8px;height:8px;border-radius:50%;background:#C084FC;flex-shrink:0;"></div>FEMA Disaster</div>
+            <div style="display:flex;align-items:center;gap:6px;font-size:10px;margin-bottom:4px;"><div style="width:8px;height:8px;border-radius:50%;background:#FF0066;flex-shrink:0;"></div>Hospital</div>
+            <div style="display:flex;align-items:center;gap:6px;font-size:10px;"><div style="width:8px;height:8px;border-radius:50%;background:#FF8800;flex-shrink:0;"></div>Volcano Alert</div>
         </div>
     </div>
 </div>
 
-<!-- Address Search Panel -->
-<div id="address-panel">
-    <h4>📍 Location Threat Analysis</h4>
-    <input id="address-input" type="text" placeholder="Enter address or city...">
-    <div id="buffer-row">
-        <span style="font-size:10px;color:rgba(255,255,255,0.4);">RADIUS</span>
-        <input id="buffer-slider" type="range" min="5" max="200" value="50" step="5">
-        <span id="buffer-label">50 miles</span>
+<!-- Location Threat Analysis Panel (bottom-right) -->
+<div id="address-panel" class="glass-panel absolute z-10 pointer-events-auto overflow-hidden" style="bottom:24px;right:24px;width:300px;">
+    <div style="background:rgba(0,0,0,0.3);padding:10px 16px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid rgba(61,73,87,0.3);">
+        <h4 style="font-size:9px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#58bfff;">Threat Analysis</h4>
+        <span class="material-symbols-outlined text-primary" style="font-size:14px;font-variation-settings:'FILL' 1;">security</span>
     </div>
-    <button id="search-btn" onclick="searchLocation()">🔍 ANALYZE THREATS</button>
-    <div id="threat-results"></div>
-    <div id="clear-search" onclick="clearSearch()">✕ Clear search</div>
+    <div style="padding:16px;">
+        <label style="display:block;font-size:9px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#a0acbd;margin-bottom:8px;">Search Location</label>
+        <div style="position:relative;">
+            <input id="address-input" type="text" placeholder="ENTER ADDRESS OR CITY" style="width:100%;background:rgba(0,0,0,0.4);border:none;border-bottom:2px solid rgba(106,118,134,0.4);color:#dde9fb;font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;padding:8px 28px 8px 0;outline:none;transition:border-color 0.2s;font-family:'Inter',sans-serif;">
+            <span class="material-symbols-outlined" style="position:absolute;right:0;top:8px;font-size:14px;color:#6a7686;">search</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px;margin-bottom:6px;">
+            <label style="font-size:9px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#a0acbd;">Analysis Radius</label>
+            <span id="buffer-label" style="font-size:10px;font-weight:700;color:#58bfff;">50 miles</span>
+        </div>
+        <input id="buffer-slider" type="range" min="5" max="200" value="50" step="5" style="width:100%;accent-color:#58bfff;">
+        <div id="threat-results" style="display:none;margin-top:12px;max-height:180px;overflow-y:auto;"></div>
+        <button id="search-btn" onclick="searchLocation()" class="flex items-center justify-center gap-2 w-full mt-4 py-2.5 text-xs font-bold tracking-widest uppercase transition-all" style="background:#102131;border:1px solid rgba(61,73,87,0.4);color:#dde9fb;font-family:'Inter',sans-serif;cursor:pointer;letter-spacing:2px;">
+            RUN FULL SITE AUDIT
+            <span class="material-symbols-outlined" style="font-size:13px;">arrow_forward_ios</span>
+        </button>
+        <div id="clear-search" onclick="clearSearch()" style="display:none;text-align:center;margin-top:8px;font-size:10px;color:#a0acbd;cursor:pointer;letter-spacing:1px;">✕ Clear search</div>
+    </div>
 </div>
+
+<!-- Hover tooltip -->
+<div id="hover-tooltip"></div>
 
 <!-- Popup -->
 <div id="popup">
@@ -2279,8 +2118,42 @@ function toggleLegend() {{
     _legendOpen = !_legendOpen;
     const legend = document.getElementById('legend');
     const arrow  = document.getElementById('legend-toggle-arrow');
-    legend.classList.toggle('collapsed', !_legendOpen);
+    legend.style.display = _legendOpen ? 'grid' : 'none';
     arrow.style.transform = _legendOpen ? '' : 'rotate(180deg)';
+}}
+
+// ── SIDEBAR HELPERS ───────────────────────────────
+function toggleLayerPanel() {{
+    const p = document.getElementById('layer-panel');
+    if (!p) return;
+    p.style.display = (p.style.display === 'none' || p.style.display === '') ? 'flex' : 'none';
+}}
+function flyToWarnings() {{
+    if (_latestWarnings?.features?.length) {{
+        const f = _latestWarnings.features[0];
+        const coords = f.geometry?.coordinates?.[0]?.[0];
+        if (coords) map.flyTo({{center: coords, zoom: 5, duration: 1400}});
+    }}
+}}
+function flyToEarthquakes() {{
+    if (_latestEarthquakes?.features?.length) {{
+        const biggest = [..._latestEarthquakes.features]
+            .sort((a,b) => (b.properties?.mag||0) - (a.properties?.mag||0))[0];
+        if (biggest?.geometry?.coordinates) {{
+            const [lng,lat] = biggest.geometry.coordinates;
+            map.flyTo({{center:[lng,lat], zoom:6, duration:1400}});
+        }}
+    }}
+}}
+function flyToFires() {{
+    if (_latestFires?.features?.length) {{
+        const pts = _latestFires.features.filter(f=>f.geometry?.coordinates);
+        if (pts.length) {{
+            const lng = pts.reduce((s,p)=>s+p.geometry.coordinates[0],0)/pts.length;
+            const lat = pts.reduce((s,p)=>s+p.geometry.coordinates[1],0)/pts.length;
+            map.flyTo({{center:[lng,lat], zoom:5, duration:1400}});
+        }}
+    }}
 }}
 
 function showPopup(title, rows, e) {{
@@ -2929,15 +2802,16 @@ function setupLayers() {{
 
     // ── LAYER TOGGLE BUTTONS ─────────────────────────
     const toggleContainer = document.createElement('div');
+    toggleContainer.id = 'layer-panel';
     toggleContainer.style.cssText = `
-        position: absolute; top: 200px; right: 16px; z-index: 10;
-        display: flex; flex-direction: column; gap: 5px;
-        background: linear-gradient(135deg, rgba(0,8,20,0.92) 0%, rgba(0,15,35,0.92) 100%);
-        border: 1px solid rgba(255,255,255,0.07);
-        border-radius: 10px; padding: 10px 12px;
+        position: absolute; top: 80px; right: 24px; z-index: 10;
+        display: flex; flex-direction: column; gap: 4px;
+        background: rgba(21,39,57,0.6);
+        border: 1px solid rgba(88,191,255,0.1);
+        padding: 12px 14px;
         backdrop-filter: blur(20px);
         box-shadow: 0 4px 24px rgba(0,0,0,0.4);
-        min-width: 170px;
+        min-width: 180px;
     `;
 
     // Collapsible layer list
@@ -2954,16 +2828,16 @@ function setupLayers() {{
 
     const toggleHeader = document.createElement('div');
     toggleHeader.style.cssText = `
-        font-size: 9px; color: rgba(0,180,255,0.8); font-weight: 600;
+        font-size: 9px; color: #58bfff; font-weight: 700;
         letter-spacing: 2px; text-transform: uppercase;
-        padding-bottom: 0; cursor: pointer;
+        padding-bottom: 8px; margin-bottom: 4px; cursor: pointer;
         display: flex; justify-content: space-between; align-items: center;
-        user-select: none;
+        border-bottom: 1px solid rgba(88,191,255,0.15); user-select: none;
     `;
     const layerArrow = document.createElement('span');
     layerArrow.textContent = '▶';
     layerArrow.style.cssText = 'font-size: 8px; transition: transform 0.2s;';
-    toggleHeader.appendChild(document.createTextNode('LAYERS'));
+    toggleHeader.appendChild(document.createTextNode('ACTIVE LAYERS'));
     toggleHeader.appendChild(layerArrow);
     toggleHeader.onclick = () => {{
         _layersOpen = !_layersOpen;
@@ -3165,44 +3039,90 @@ map.on('load', function() {{
 // ── SITREP ────────────────────────────────────────
 let _sitrepRaw = '';
 function openSitrep() {{
-    const overlay = document.getElementById('sitrep-overlay');
-    const body = document.getElementById('sitrep-body');
-    overlay.classList.add('open');
-    body.innerHTML = '<p style="color:rgba(0,200,255,0.5);font-size:12px;">⚡ Generating situation report...</p>';
+    document.getElementById('sitrep-overlay').classList.add('open');
+    // Reset to loading state
+    const setEl = (id, html) => {{ const el = document.getElementById(id); if (el) el.innerHTML = html; }};
+    setEl('sitrep-level', '—');
+    document.getElementById('sitrep-level').style.color = '#FF8C00';
+    setEl('sitrep-status-badge', 'ANALYZING...');
+    setEl('sitrep-summary', 'Generating report...');
+    setEl('sitrep-threats', '<p style="color:#a0acbd;font-size:13px;">Analyzing threats...</p>');
+    setEl('sitrep-actions', '<p style="color:#a0acbd;font-size:11px;">Processing...</p>');
+    setEl('sitrep-confidence', '<p>&gt; FETCHING_DATA...</p>');
     _sitrepRaw = '';
     fetch('/api/sitrep')
         .then(r => r.json())
         .then(data => {{
             _sitrepRaw = data.raw || data.text || '';
-            const blocks = (data.text || '').split(/\\n\\n+/).filter(p => p.trim());
-            body.innerHTML = blocks.map(block => {{
-                const t = block.trim();
-                // SEVERITY line → colored badge
-                if (t.startsWith('SEVERITY:')) {{
-                    const num = parseInt(t.replace('SEVERITY:', '').trim(), 10);
-                    const color = num >= 8 ? '#FF4444' : num >= 5 ? '#FF8C00' : '#00CC66';
-                    return `<div style="margin-bottom:12px;display:flex;align-items:center;gap:10px;">
-                        <span style="font-size:9px;letter-spacing:2px;color:rgba(0,180,255,0.7);font-weight:600;">NATIONAL THREAT LEVEL</span>
-                        <span style="font-size:22px;font-weight:700;color:${{color}};">${{isNaN(num)?t.replace('SEVERITY:','').trim():num}}/10</span>
-                    </div>`;
-                }}
-                // Section headers (PRIORITY THREATS:, SITUATION:, ACTIONS:)
-                const headerMatch = t.match(/^([A-Z][A-Z ]+):(.*)$/s);
-                if (headerMatch) {{
-                    const label = headerMatch[1].trim();
-                    const body2 = headerMatch[2].trim();
-                    const lines = body2.split('\\n').filter(l=>l.trim()).map(l=>`<div style="margin:3px 0;padding-left:8px;color:rgba(255,255,255,0.8);">${{l.trim()}}</div>`).join('');
-                    return `<div style="margin-bottom:12px;">
-                        <div style="font-size:9px;letter-spacing:2px;color:rgba(0,180,255,0.7);font-weight:600;margin-bottom:4px;">${{label}}</div>
-                        ${{lines || `<div style="color:rgba(255,255,255,0.8);">${{body2}}</div>`}}
-                    </div>`;
-                }}
-                return `<p>${{t}}</p>`;
-            }}).join('');
+            parseSitrep(_sitrepRaw);
         }})
         .catch(() => {{
-            body.innerHTML = '<p style="color:rgba(255,100,100,0.8)">Failed to generate report. Check GROQ_API_KEY.</p>';
+            document.getElementById('sitrep-summary').textContent = 'Failed to generate report. Check GROQ_API_KEY.';
+            document.getElementById('sitrep-summary').style.color = '#ff716c';
         }});
+}}
+function parseSitrep(text) {{
+    // SEVERITY
+    const sevMatch = text.match(/SEVERITY:\s*(\d+)/i);
+    const severity = sevMatch ? parseInt(sevMatch[1], 10) : 5;
+    const levelEl = document.getElementById('sitrep-level');
+    if (levelEl) {{
+        levelEl.textContent = isNaN(severity) ? '?' : severity;
+        levelEl.style.color = severity >= 8 ? '#FF4444' : severity >= 5 ? '#FF8C00' : '#00CC66';
+    }}
+    const badge = document.getElementById('sitrep-status-badge');
+    if (badge) {{
+        const label = severity >= 8 ? 'CRITICAL RISK' : severity >= 6 ? 'ELEVATED RISK' : severity >= 4 ? 'ADVISORY' : 'NORMAL';
+        const col   = severity >= 8 ? '#FF4444' : severity >= 6 ? '#FF8C00' : '#00CC66';
+        badge.textContent = label;
+        badge.style.color = col;
+        badge.style.borderColor = col + '55';
+        badge.style.background  = col + '18';
+    }}
+    // PRIORITY THREATS
+    const threatsMatch = text.match(/PRIORITY THREATS:\n([\s\S]*?)(?:\n\nSITUATION:|$)/i);
+    const threatsEl = document.getElementById('sitrep-threats');
+    if (threatsEl && threatsMatch) {{
+        const items = threatsMatch[1].trim().split('\\n').filter(l => l.trim());
+        const icons = ['warning', 'local_fire_department', 'cyclone'];
+        const labels = ['CRITICAL', 'HIGH', 'MEDIUM'];
+        const colors = ['#58bfff', '#FF8C00', '#ac89ff'];
+        threatsEl.innerHTML = items.slice(0, 3).map((line, i) => {{
+            const content = line.replace(/^\d+\.\s*/, '').trim();
+            const c = colors[i] || colors[2];
+            const ic = icons[i] || 'warning';
+            return `<div style="display:flex;align-items:flex-start;gap:12px;background:rgba(21,39,57,0.5);padding:10px 12px;border-left:3px solid ${{c}};">
+                <span class="material-symbols-outlined" style="color:${{c}};font-size:18px;flex-shrink:0;">${{ic}}</span>
+                <div style="flex:1;min-width:0;">
+                    <p style="font-size:12px;color:#dde9fb;line-height:1.4;">${{content}}</p>
+                </div>
+                <span style="font-size:10px;font-weight:700;color:${{c}};flex-shrink:0;">${{labels[i]||''}}</span>
+            </div>`;
+        }}).join('');
+    }}
+    // SITUATION
+    const sitMatch = text.match(/SITUATION:\s*([\s\S]*?)(?:\n\nACTIONS:|$)/i);
+    const summaryEl = document.getElementById('sitrep-summary');
+    if (summaryEl && sitMatch) summaryEl.textContent = sitMatch[1].trim();
+    // ACTIONS
+    const actMatch = text.match(/ACTIONS:\s*([\s\S]*)$/i);
+    const actionsEl = document.getElementById('sitrep-actions');
+    if (actionsEl && actMatch) {{
+        const acts = actMatch[1].trim().split('\\n').filter(l => l.trim());
+        const codes = ['001-ALPHA', '002-BRAVO', '003-GAMMA', '004-DELTA'];
+        actionsEl.innerHTML = acts.slice(0, 4).map((line, i) => {{
+            const content = line.replace(/^[-\d.]+\s*/, '').trim();
+            const isFirst = i === 0;
+            return `<div style="position:relative;padding-left:20px;border-left:1px solid rgba(61,73,87,0.5);">
+                <div style="position:absolute;left:-4px;top:2px;width:7px;height:7px;background:${{isFirst ? '#58bfff' : '#6a7686'}};"></div>
+                <span style="font-size:9px;font-weight:700;color:${{isFirst ? '#58bfff' : '#a0acbd'}};letter-spacing:1px;">${{codes[i]||''}}</span>
+                <p style="font-size:11px;color:#dde9fb;margin-top:3px;line-height:1.4;">${{content}}</p>
+            </div>`;
+        }}).join('');
+    }}
+    // AI terminal
+    const confEl = document.getElementById('sitrep-confidence');
+    if (confEl) confEl.innerHTML = `<p>&gt; ANALYSIS_COMPLETE</p><p>&gt; MODEL: GROQ-LLAMA-3.3</p><p>&gt; THREAT_VECTORS_MAPPED</p>`;
 }}
 function closeSitrep() {{
     document.getElementById('sitrep-overlay').classList.remove('open');
@@ -3211,8 +3131,7 @@ function copySitrep() {{
     if (!_sitrepRaw) return;
     navigator.clipboard.writeText(_sitrepRaw).then(() => {{
         const fb = document.getElementById('sitrep-copy-feedback');
-        fb.textContent = '✓ Copied';
-        setTimeout(() => {{ fb.textContent = ''; }}, 2000);
+        if (fb) {{ fb.textContent = ' ✓'; setTimeout(() => {{ fb.textContent = ''; }}, 2000); }}
     }});
 }}
 
