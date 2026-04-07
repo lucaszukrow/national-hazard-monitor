@@ -1692,7 +1692,7 @@ def mapbox_map():
     <meta charset="utf-8"/>
     <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
     <title>National All-Hazards Monitor</title>
-    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
     <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
     <script src="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.js"></script>
@@ -1856,7 +1856,7 @@ def mapbox_map():
 <!-- Top Header -->
 <header class="fixed top-0 left-1/2 -translate-x-1/2 z-50 flex items-center gap-6 bg-slate-900/60 backdrop-blur-xl mt-3 w-fit border border-primary/20 px-6 py-2" style="box-shadow:0 0 15px rgba(88,191,255,0.1);">
     <div class="flex items-center gap-3">
-        <div class="w-2.5 h-2.5 bg-error rounded-full live-pulse"></div>
+        <div id="live-dot" class="w-2.5 h-2.5 bg-error rounded-full live-pulse"></div>
         <div class="flex flex-col">
             <h1 style="font-family:'Space Grotesk',sans-serif;font-size:13px;font-weight:700;letter-spacing:3px;color:#58bfff;text-transform:uppercase;">National All-Hazards Monitor</h1>
             <p id="update-time" style="font-size:9px;color:#a0acbd;letter-spacing:2px;font-weight:700;text-transform:uppercase;margin-top:2px;">ACQUIRING LIVE DATA...</p>
@@ -2794,8 +2794,10 @@ function setupLayers() {{
             map.getSource('nexrad').tiles = [
                 `https://mesonet.agron.iastate.edu/cgi-bin/wms/nexrad/n0r.cgi?SERVICE=WMS&REQUEST=GetMap&VERSION=1.1.1&LAYERS=nexrad-n0r&STYLES=&FORMAT=image/png&TRANSPARENT=TRUE&HEIGHT=256&WIDTH=256&SRS=EPSG:3857&BBOX={{bbox-epsg-3857}}&_t=${{t}}`
             ];
-            map.style.sourceCaches['nexrad'].clearTiles();
-            map.style.sourceCaches['nexrad'].update(map.transform);
+            try {{
+                map.style.sourceCaches['nexrad'].clearTiles();
+                map.style.sourceCaches['nexrad'].update(map.transform);
+            }} catch(e) {{}}
             map.triggerRepaint();
         }}
     }}, 60000);
