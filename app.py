@@ -1247,6 +1247,9 @@ def fetch_volcanoes():
         for feat in data.get("features", []):
             try:
                 props = feat.get("properties") or {}
+                # GDACS API ignores eventlist=VO — must filter by eventtype client-side
+                if str(props.get("eventtype", "")).upper() != "VO":
+                    continue
                 alert = str(props.get("alertlevel", "")).lower()
                 # Only show elevated (orange/red) current events to avoid clutter
                 if alert not in ("orange", "red"):
