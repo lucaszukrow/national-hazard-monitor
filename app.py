@@ -3115,7 +3115,7 @@ function openSitrep() {{
         .then(r => r.json())
         .then(data => {{
             _sitrepRaw = data.raw || data.text || '';
-            const paragraphs = (data.text || '').split(/\n\n+/).filter(p => p.trim());
+            const paragraphs = (data.text || '').split(/\\n\\n+/).filter(p => p.trim());
             body.innerHTML = paragraphs.map(p => `<p>${{p.trim()}}</p>`).join('');
         }})
         .catch(() => {{
