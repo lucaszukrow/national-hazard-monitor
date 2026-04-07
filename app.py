@@ -3080,7 +3080,7 @@ function parseSitrep(text) {{
         badge.style.background  = col + '18';
     }}
     // PRIORITY THREATS
-    const threatsMatch = text.match(/PRIORITY THREATS:\n([\s\S]*?)(?:\n\nSITUATION:|$)/i);
+    const threatsMatch = text.match(/PRIORITY THREATS:\\n([\\s\\S]*?)(?:\\n\\nSITUATION:|$)/i);
     const threatsEl = document.getElementById('sitrep-threats');
     if (threatsEl && threatsMatch) {{
         const items = threatsMatch[1].trim().split('\\n').filter(l => l.trim());
@@ -3101,11 +3101,11 @@ function parseSitrep(text) {{
         }}).join('');
     }}
     // SITUATION
-    const sitMatch = text.match(/SITUATION:\s*([\s\S]*?)(?:\n\nACTIONS:|$)/i);
+    const sitMatch = text.match(/SITUATION:\\s*([\\s\\S]*?)(?:\\n\\nACTIONS:|$)/i);
     const summaryEl = document.getElementById('sitrep-summary');
     if (summaryEl && sitMatch) summaryEl.textContent = sitMatch[1].trim();
     // ACTIONS
-    const actMatch = text.match(/ACTIONS:\s*([\s\S]*)$/i);
+    const actMatch = text.match(/ACTIONS:\\s*([\\s\\S]*)$/i);
     const actionsEl = document.getElementById('sitrep-actions');
     if (actionsEl && actMatch) {{
         const acts = actMatch[1].trim().split('\\n').filter(l => l.trim());
