@@ -35,14 +35,16 @@ Missing required keys are logged as warnings at startup. Missing optional keys s
 
 ## Architecture
 
-Everything lives in a single file: `app.py` (~4100 lines). There are no modules, no tests, no build step.
+Everything lives in a single file: `app.py` (~4400 lines). There are no modules, no tests, no build step.
 
 ### Two map views
 
 | Route | Stack | Purpose |
 |-------|-------|---------|
-| `/` | Dash + Folium | Dashboard with charts, stat cards, county table, embedded Folium map |
-| `/mapbox` | Mapbox GL JS (served as raw HTML from Flask) | Flagship full-screen map with glassmorphism dark UI |
+| `/` | Dash + Folium | Legacy dashboard with charts, stat cards, county table, embedded Folium map |
+| `/mapbox` | Mapbox GL JS (served as raw HTML from Flask) | Flagship full-screen map with glassmorphism dark UI — **this is the primary view** |
+
+The Mapbox page now includes everything: stat cards, AI situation report, hazard overview chart, layer toggles, and the location threat analysis panel.
 
 The Mapbox page is a large f-string returned by the `mapbox_map()` Flask route. All its CSS, HTML, and JavaScript live inside that string. Because it is an f-string, literal `{` and `}` must be written as `{{` and `}}` throughout the JS/CSS.
 
@@ -67,13 +69,14 @@ The Mapbox page is a large f-string returned by the `mapbox_map()` Flask route. 
 | `/api/storms` | NHC | Hurricane cones and track points (GeoJSON) |
 | `/api/counties` | Plotly/Census | Affected county polygons with population (GeoJSON) |
 | `/api/infrastructure` | OpenStreetMap Overpass | Hospitals, fire stations, power plants, schools near warnings (GeoJSON) |
-| `/api/summary` | state dict | Hazard counts and last update time (JSON) |
+| `/api/summary` | state dict | Hazard counts and last update time (JSON) — includes `river_gauges`, `volcanoes`, `drought` counts |
 | `/api/air_quality` | EPA AirNow | AQI monitoring station readings (GeoJSON) |
 | `/api/fema_disasters` | FEMA OpenFEMA | Active disaster declarations last 60 days, state-level (GeoJSON) |
-| `/api/river_gauges` | USGS WaterWatch | River gauges at/above flood stage (GeoJSON) |
-| `/api/volcanoes` | USGS VHP | Volcano alert levels advisory and above (GeoJSON) |
-| `/api/drought` | NOAA/USDA Drought Monitor | Drought severity polygons D0–D4 (GeoJSON) |
-| `/api/shelters` | FEMA NSS | Open emergency shelters (GeoJSON) |
+| `/api/river_gauges` | NOAA AHPS ArcGIS | River gauges at/above flood stage (GeoJSON) |
+| `/api/volcanoes` | GDACS | Volcano Orange/Red alert events (GeoJSON) |
+| `/api/drought` | UNL Drought Monitor | Drought severity polygons D0–D4 (GeoJSON) |
+| `/api/shelters` | FEMA NSS ArcGIS | Open emergency shelters (GeoJSON) |
+| `/api/sitrep` | Groq llama-3.3-70b | AI situation report as JSON `{text, raw}` |
 
 ### Key globals
 
@@ -110,6 +113,36 @@ Keep both. They answer different questions: "what's happening right now" vs "wha
 ### Fire perimeter note
 
 The NIFC/ArcGIS endpoints return a mix of Polygon features (actual mapped perimeters) and Point features (incident location markers). Only `Polygon` and `MultiPolygon` geometry types are passed through to the API — Points are filtered out because they cannot render as fill layers and appear as invisible dots.
+
+The primary NIFC endpoint (`WFIGS_Interagency_Perimeters_YTD`) returns 400 errors in the off-season (January–April). This is expected — the service is in maintenance and will return data when fire season starts.
+
+### Data source URLs (confirmed working as of April 2026)
+
+Several URLs were replaced after the originals went dead:
+- **River gauges**: `mapservices.weather.noaa.gov/eventdriven/rest/services/water/riv_gauges/MapServer/0/query` (replaced dead waterwatch.usgs.gov)
+- **Volcanoes**: `gdacs.org/gdacsapi/api/events/geteventlist/MAP?eventlist=VO` (USGS has no public JSON API — all URLs return HTML)
+- **Drought**: `droughtmonitor.unl.edu/data/json/usdm_current.json` (replaced broken ArcGIS URL)
+- **FEMA Disasters**: OData filter uses `params={}` dict with single-quoted date value `declarationDate ge '2026-02-05'`
+
+### AirNow gotcha
+
+`AIRNOW_KEY` must be `.strip()`-ped when reading from env — Render stores it with a trailing `\n` which becomes `%0A` in the URL and causes 401s. The fix is already in place at the env var assignment line.
+
+AirNow sometimes returns `"Category": 2` (integer) instead of `"Category": {"Name": "Good", "Number": 2}`. The parsing code guards against this with `isinstance(cat_raw, dict)`.
+
+### Email alerts note
+
+`send_alert_email()` uses `ALERT_EMAIL` as both the `from_email` and `to_emails`. Do not change `from_email` to a hardcoded domain unless that domain is verified in SendGrid — SendGrid returns 403 for unverified senders.
+
+### Mapbox page UI components
+
+The Mapbox page (`mapbox_map()` f-string) includes:
+- **Stat cards** (top-left) — 6 cards updated by `loadData()` every 5 min
+- **Hazard overview chart** (top-left, next to stat cards) — Chart.js bar chart showing counts from `/api/summary`
+- **Layer toggles** (right side, scrollable) — `makeToggle(label, layerId, defaultOn)` where `layerId` can be a string OR array of strings. Toggle panel has `max-height: calc(100vh - 280px)` to prevent overlap with the search panel.
+- **Location Threat Analysis** (bottom-right) — address search with radius slider, real-time threat score, FEMA NRI panel
+- **AI Situation Report** — button in header calls `/api/sitrep`, displays modal with copy-to-clipboard
+- **Legend** (bottom-left) — collapsible
 
 ### Dependency notes
 
