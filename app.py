@@ -1711,7 +1711,7 @@ def mapbox_map():
         .mt-auto{{margin-top:auto}}
         .grid-cols-2{{grid-template-columns:repeat(2,minmax(0,1fr))}}
         .gap-1{{gap:4px}}.gap-2{{gap:8px}}.gap-3{{gap:12px}}.gap-4{{gap:16px}}.gap-5{{gap:20px}}.gap-6{{gap:24px}}.gap-8{{gap:32px}}
-        .h-full{{height:100%}}.w-full{{width:100%}}.w-fit{{width:fit-content}}
+        .h-full{{height:100%}}.w-full{{width:100%}}.w-fit{{width:-webkit-fit-content;width:fit-content}}
         .w-20{{width:80px}}.w-2{{width:8px}}.w-2\.5{{width:10px}}.w-6{{width:24px}}.w-8{{width:32px}}
         .h-2{{height:8px}}.h-2\.5{{height:10px}}.h-6{{height:24px}}.h-8{{height:32px}}
         .min-w-0{{min-width:0}}
@@ -1877,8 +1877,8 @@ def mapbox_map():
     <div class="flex items-center gap-3">
         <div id="live-dot" class="w-2.5 h-2.5 bg-error rounded-full live-pulse"></div>
         <div class="flex flex-col">
-            <h1 style="font-family:'Space Grotesk',sans-serif;font-size:13px;font-weight:700;letter-spacing:3px;color:#58bfff;text-transform:uppercase;">National All-Hazards Monitor</h1>
-            <p id="update-time" style="font-size:9px;color:#a0acbd;letter-spacing:2px;font-weight:700;text-transform:uppercase;margin-top:2px;">ACQUIRING LIVE DATA...</p>
+            <h1 style="font-family:'Space Grotesk',sans-serif;font-size:13px;font-weight:700;letter-spacing:3px;color:#58bfff;text-transform:uppercase;white-space:nowrap;">National All-Hazards Monitor</h1>
+            <p id="update-time" style="font-size:9px;color:#a0acbd;letter-spacing:2px;font-weight:700;text-transform:uppercase;margin-top:2px;white-space:nowrap;">ACQUIRING LIVE DATA...</p>
         </div>
     </div>
     <div style="width:1px;height:24px;background:rgba(61,73,87,0.5);"></div>
@@ -2817,7 +2817,6 @@ function setupLayers() {{
                 map.style.sourceCaches['nexrad'].clearTiles();
                 map.style.sourceCaches['nexrad'].update(map.transform);
             }} catch(e) {{}}
-            map.triggerRepaint();
         }}
     }}, 60000);
 
