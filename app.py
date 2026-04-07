@@ -662,49 +662,85 @@ def generate_sitrep():
     s        = state["summary"]
     affected = s.get("affected_counties", [])
 
-    # Top 15 affected areas for context
+    # Top 15 affected areas
     top_areas = "\n".join(
-        f"  - {c.get('county','')}, {c.get('state','')} "
-        f"({c.get('event','')}, {c.get('sig','')})"
+        f"  - {c.get('county','')}, {c.get('state','')} ({c.get('event','')}, sig={c.get('sig','')})"
         for c in affected[:15]
     )
 
+    # Top 5 earthquakes by magnitude
+    eq_features = state.get("earthquakes", {}).get("features", [])
+    eq_features_sorted = sorted(eq_features, key=lambda f: f.get("properties", {}).get("mag", 0), reverse=True)
+    top_eqs = "\n".join(
+        f"  - M{f['properties'].get('mag','?')} near {f['properties'].get('place','unknown')}"
+        for f in eq_features_sorted[:5]
+    )
+
+    # Top 5 flood gauges by severity
+    gauge_features = state.get("river_gauges", {}).get("features", [])
+    top_gauges = "\n".join(
+        f"  - {f['properties'].get('gaugelid','')}: {f['properties'].get('status','')} — {f['properties'].get('waterbody','')}, {f['properties'].get('state','')}"
+        for f in gauge_features[:5]
+    )
+
+    # Volcano alerts
+    vol_features = state.get("volcanoes", {}).get("features", [])
+    top_vols = "\n".join(
+        f"  - {f['properties'].get('name','')}: alert={f['properties'].get('alertlevel','')}"
+        for f in vol_features[:5]
+    )
+
+    # AQ summary — count unhealthy stations
+    aq_features = state.get("air_quality", {}).get("features", [])
+    aq_unhealthy = sum(1 for f in aq_features if (f.get("properties", {}).get("aqi") or 0) > 100)
+
     context = (
-        f"Report time: {state.get('last_update', 'Unknown')}\n"
-        f"Active NWS warnings / watches / advisories: {s.get('warnings_count', 0)}\n"
+        f"Report time: {state.get('last_update', 'Unknown')} UTC\n"
+        f"\n--- ACTIVE HAZARDS ---\n"
+        f"NWS warnings/watches/advisories: {s.get('warnings_count', 0)}\n"
         f"Counties under active warnings: {s.get('counties_count', 0)}\n"
-        f"Estimated population at risk: {s.get('total_population', 0):,}\n"
+        f"Estimated population at risk from warnings: {s.get('total_population', 0):,}\n"
         f"SPC severe weather outlook zones: {s.get('spc_zones', 0)}\n"
         f"Earthquakes M2.5+ (past 24 h): {s.get('earthquakes', 0)}\n"
         f"Active tropical storms / hurricanes: {s.get('active_storms', 0)}\n"
-        f"Active wildfire detections (satellite): {s.get('wildfires', 0)}\n"
-        + (f"\nTop affected areas:\n{top_areas}" if top_areas else "")
+        f"Wildfire satellite detections: {s.get('wildfires', 0)}\n"
+        f"River gauges at/above flood stage: {s.get('river_gauges', 0)}\n"
+        f"Volcano orange/red alerts: {s.get('volcanoes', 0)}\n"
+        f"Drought polygons (D0-D4): {s.get('drought', 0)}\n"
+        f"Air quality stations with AQI > 100 (unhealthy): {aq_unhealthy}\n"
+        + (f"\nTop NWS-warned areas:\n{top_areas}" if top_areas else "")
+        + (f"\nLargest earthquakes:\n{top_eqs}" if top_eqs else "")
+        + (f"\nCritical flood gauges:\n{top_gauges}" if top_gauges else "")
+        + (f"\nVolcano alerts:\n{top_vols}" if top_vols else "")
     )
 
     try:
         ai_client = _GroqClient(api_key=GROQ_API_KEY)
         response = ai_client.chat.completions.create(
             model="llama-3.3-70b-versatile",
-            max_tokens=800,
+            max_tokens=900,
             messages=[
                 {
                     "role": "system",
                     "content": (
                         "You are a national emergency management professional writing situation "
-                        "reports for emergency operations centers. Write concise, authoritative "
-                        "briefings in plain language. Do not use bullet points or headers. "
-                        "Write exactly 3 paragraphs separated by a blank line."
+                        "reports for emergency operations centers. Be concise and authoritative. "
+                        "Use plain language. No markdown formatting."
                     )
                 },
                 {
                     "role": "user",
                     "content": (
-                        "Based on this real-time national hazard monitoring data, write a "
-                        "3-paragraph emergency situation briefing:\n\n"
-                        f"{context}\n\n"
-                        "Paragraph 1: Current active threats and overall hazard picture.\n"
-                        "Paragraph 2: Affected population scale and likely infrastructure impacts.\n"
-                        "Paragraph 3: Recommended protective actions and response priorities for emergency managers."
+                        "Based on this real-time national hazard data, write a structured briefing "
+                        "using exactly this format:\n\n"
+                        "SEVERITY: [single integer 1-10, where 10 is catastrophic national emergency]\n\n"
+                        "PRIORITY THREATS:\n"
+                        "1. [Most urgent threat — specific location, event type, scale]\n"
+                        "2. [Second threat]\n"
+                        "3. [Third threat — if applicable, else omit]\n\n"
+                        "SITUATION: [2-3 sentences summarizing the overall national hazard picture]\n\n"
+                        "ACTIONS: [2-3 specific recommended actions for emergency managers]\n\n"
+                        f"Data:\n{context}"
                     )
                 }
             ]
@@ -2126,9 +2162,9 @@ def mapbox_map():
 <div id="legend-wrap">
     <div id="legend-toggle" onclick="toggleLegend()">
         <span>MAP LEGEND</span>
-        <span id="legend-toggle-arrow">▲</span>
+        <span id="legend-toggle-arrow" style="transform: rotate(180deg); display: inline-block;">▲</span>
     </div>
-    <div id="legend">
+    <div id="legend" class="collapsed">
         <div>
             <div class="legend-title">NWS Warnings</div>
             <div class="legend-item"><div class="legend-box" style="background:#FF0000"></div>Tornado</div>
@@ -2235,7 +2271,7 @@ map.addControl(new mapboxgl.NavigationControl(), 'top-right');
 map.addControl(new mapboxgl.FullscreenControl(), 'top-right');
 
 // ── LEGEND TOGGLE ────────────────────────────────
-let _legendOpen = true;
+let _legendOpen = false;
 function toggleLegend() {{
     _legendOpen = !_legendOpen;
     const legend = document.getElementById('legend');
@@ -2899,20 +2935,40 @@ function setupLayers() {{
         backdrop-filter: blur(20px);
         box-shadow: 0 4px 24px rgba(0,0,0,0.4);
         min-width: 170px;
-        max-height: calc(100vh - 280px);
+    `;
+
+    // Collapsible layer list
+    let _layersOpen = false;
+    const toggleList = document.createElement('div');
+    toggleList.style.cssText = `
+        display: none; flex-direction: column; gap: 5px;
+        max-height: calc(100vh - 480px);
         overflow-y: auto;
         scrollbar-width: thin;
         scrollbar-color: rgba(0,180,255,0.3) transparent;
+        margin-top: 6px;
     `;
+
     const toggleHeader = document.createElement('div');
-    toggleHeader.textContent = 'LAYERS';
     toggleHeader.style.cssText = `
         font-size: 9px; color: rgba(0,180,255,0.8); font-weight: 600;
         letter-spacing: 2px; text-transform: uppercase;
-        margin-bottom: 6px; padding-bottom: 5px;
-        border-bottom: 1px solid rgba(0,180,255,0.2);
+        padding-bottom: 0; cursor: pointer;
+        display: flex; justify-content: space-between; align-items: center;
+        user-select: none;
     `;
+    const layerArrow = document.createElement('span');
+    layerArrow.textContent = '▶';
+    layerArrow.style.cssText = 'font-size: 8px; transition: transform 0.2s;';
+    toggleHeader.appendChild(document.createTextNode('LAYERS'));
+    toggleHeader.appendChild(layerArrow);
+    toggleHeader.onclick = () => {{
+        _layersOpen = !_layersOpen;
+        toggleList.style.display = _layersOpen ? 'flex' : 'none';
+        layerArrow.style.transform = _layersOpen ? 'rotate(90deg)' : '';
+    }};
     toggleContainer.appendChild(toggleHeader);
+    toggleContainer.appendChild(toggleList);
 
     function makeToggle(label, layerId, defaultOn) {{
         const btn = document.createElement('button');
@@ -2939,23 +2995,23 @@ function setupLayers() {{
         return btn;
     }}
 
-    toggleContainer.appendChild(makeToggle('🔥 Fire Detections', ['fire-clusters','fire-cluster-count','fire-points'], true));
-    toggleContainer.appendChild(makeToggle('🔥 Fire Heatmap', 'fire-heat', true));
-    toggleContainer.appendChild(makeToggle('🔥 Fire Perimeters', 'fire-perimeter-fill', true));
-    toggleContainer.appendChild(makeToggle('⚡ Storm Reports', 'lightning-strikes', true));
-    toggleContainer.appendChild(makeToggle('🌀 Hurricanes', 'storm-track', true));
-    toggleContainer.appendChild(makeToggle('NEXRAD Radar', 'nexrad-layer', true));
-    toggleContainer.appendChild(makeToggle('GOES Infrared', 'goes-ir-layer', false));
-    toggleContainer.appendChild(makeToggle('Affected Counties', 'counties-fill', true));
-    toggleContainer.appendChild(makeToggle('🏥 Hospitals', 'infra-normal', true));
-    toggleContainer.appendChild(makeToggle('⚠ At-Risk Infra', 'infra-at-risk', true));
-    toggleContainer.appendChild(makeToggle('🏷 Infra Labels', 'infra-labels', false));
-    toggleContainer.appendChild(makeToggle('💨 Air Quality', 'aqi-circles', true));
-    toggleContainer.appendChild(makeToggle('🌊 Flood Gauges', 'river-gauges', true));
-    toggleContainer.appendChild(makeToggle('🌋 Volcanoes', 'volcano-circles', true));
-    toggleContainer.appendChild(makeToggle('🏠 Shelters', 'shelter-circles', true));
-    toggleContainer.appendChild(makeToggle('🏜 Drought', 'drought-fill', false));
-    toggleContainer.appendChild(makeToggle('🏛 FEMA Disasters', 'fema-disasters', false));
+    toggleList.appendChild(makeToggle('🔥 Fire Detections', ['fire-clusters','fire-cluster-count','fire-points'], true));
+    toggleList.appendChild(makeToggle('🔥 Fire Heatmap', 'fire-heat', false));
+    toggleList.appendChild(makeToggle('🔥 Fire Perimeters', 'fire-perimeter-fill', true));
+    toggleList.appendChild(makeToggle('⚡ Storm Reports', 'lightning-strikes', true));
+    toggleList.appendChild(makeToggle('🌀 Hurricanes', 'storm-track', true));
+    toggleList.appendChild(makeToggle('NEXRAD Radar', 'nexrad-layer', true));
+    toggleList.appendChild(makeToggle('GOES Infrared', 'goes-ir-layer', false));
+    toggleList.appendChild(makeToggle('Affected Counties', 'counties-fill', true));
+    toggleList.appendChild(makeToggle('🏥 Hospitals', 'infra-normal', true));
+    toggleList.appendChild(makeToggle('⚠ At-Risk Infra', 'infra-at-risk', true));
+    toggleList.appendChild(makeToggle('🏷 Infra Labels', 'infra-labels', false));
+    toggleList.appendChild(makeToggle('💨 Air Quality', 'aqi-circles', false));
+    toggleList.appendChild(makeToggle('🌊 Flood Gauges', 'river-gauges', true));
+    toggleList.appendChild(makeToggle('🌋 Volcanoes', 'volcano-circles', true));
+    toggleList.appendChild(makeToggle('🏠 Shelters', 'shelter-circles', true));
+    toggleList.appendChild(makeToggle('🏜 Drought', 'drought-fill', false));
+    toggleList.appendChild(makeToggle('🏛 FEMA Disasters', 'fema-disasters', false));
     document.body.appendChild(toggleContainer);
 
 
@@ -3115,8 +3171,31 @@ function openSitrep() {{
         .then(r => r.json())
         .then(data => {{
             _sitrepRaw = data.raw || data.text || '';
-            const paragraphs = (data.text || '').split(/\\n\\n+/).filter(p => p.trim());
-            body.innerHTML = paragraphs.map(p => `<p>${{p.trim()}}</p>`).join('');
+            const blocks = (data.text || '').split(/\\n\\n+/).filter(p => p.trim());
+            body.innerHTML = blocks.map(block => {{
+                const t = block.trim();
+                // SEVERITY line → colored badge
+                if (t.startsWith('SEVERITY:')) {{
+                    const num = parseInt(t.replace('SEVERITY:', '').trim(), 10);
+                    const color = num >= 8 ? '#FF4444' : num >= 5 ? '#FF8C00' : '#00CC66';
+                    return `<div style="margin-bottom:12px;display:flex;align-items:center;gap:10px;">
+                        <span style="font-size:9px;letter-spacing:2px;color:rgba(0,180,255,0.7);font-weight:600;">NATIONAL THREAT LEVEL</span>
+                        <span style="font-size:22px;font-weight:700;color:${{color}};">${{isNaN(num)?t.replace('SEVERITY:','').trim():num}}/10</span>
+                    </div>`;
+                }}
+                // Section headers (PRIORITY THREATS:, SITUATION:, ACTIONS:)
+                const headerMatch = t.match(/^([A-Z][A-Z ]+):(.*)$/s);
+                if (headerMatch) {{
+                    const label = headerMatch[1].trim();
+                    const body2 = headerMatch[2].trim();
+                    const lines = body2.split('\\n').filter(l=>l.trim()).map(l=>`<div style="margin:3px 0;padding-left:8px;color:rgba(255,255,255,0.8);">${{l.trim()}}</div>`).join('');
+                    return `<div style="margin-bottom:12px;">
+                        <div style="font-size:9px;letter-spacing:2px;color:rgba(0,180,255,0.7);font-weight:600;margin-bottom:4px;">${{label}}</div>
+                        ${{lines || `<div style="color:rgba(255,255,255,0.8);">${{body2}}</div>`}}
+                    </div>`;
+                }}
+                return `<p>${{t}}</p>`;
+            }}).join('');
         }})
         .catch(() => {{
             body.innerHTML = '<p style="color:rgba(255,100,100,0.8)">Failed to generate report. Check GROQ_API_KEY.</p>';
