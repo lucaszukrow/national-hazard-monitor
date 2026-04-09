@@ -1,0 +1,107 @@
+name: Update CLAUDE.md Recent Changes
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  update-claude-md:
+    runs-on: ubuntu-latest
+    # Skip commits made by this workflow to avoid infinite loops
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 25  # enough history to cover 20 commits
+
+      - name: Generate and inject Recent Changes
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+        run: |
+          python3 << 'PYEOF'
+          import subprocess, json, os, re, urllib.request, sys
+
+          # ── 1. Collect last 20 commits ──────────────────────────────────────
+          result = subprocess.run(
+              ["git", "log", "-20", "--pretty=format:%h %s"],
+              capture_output=True, text=True, check=True
+          )
+          commits = result.stdout.strip()
+          if not commits:
+              print("No commits found — skipping update.")
+              sys.exit(0)
+
+          print("Commits collected:\n" + commits)
+
+          # ── 2. Call Groq API ─────────────────────────────────────────────────
+          prompt = (
+              "You are a technical writer maintaining a developer-facing CLAUDE.md file.\n"
+              "Given the git commits below (newest first), write a concise 'Recent Changes' section.\n\n"
+              "Rules:\n"
+              "- 4–8 plain-English bullet points (use '- ' prefix)\n"
+              "- Be specific: mention feature names, endpoints, or components affected\n"
+              "- Group related commits; skip pure chore/merge commits if they add no info\n"
+              "- Do NOT include commit hashes or dates\n"
+              "- Output ONLY the bullet points — no heading, no intro, no trailing note\n\n"
+              f"Commits:\n{commits}"
+          )
+
+          payload = json.dumps({
+              "model": "llama-3.3-70b-versatile",
+              "messages": [{"role": "user", "content": prompt}],
+              "temperature": 0.3,
+              "max_tokens": 500,
+          }).encode()
+
+          req = urllib.request.Request(
+              "https://api.groq.com/openai/v1/chat/completions",
+              data=payload,
+              headers={
+                  "Authorization": f"Bearer {os.environ['GROQ_API_KEY']}",
+                  "Content-Type": "application/json",
+              },
+          )
+
+          try:
+              with urllib.request.urlopen(req, timeout=30) as resp:
+                  data = json.loads(resp.read())
+          except Exception as e:
+              print(f"Groq API call failed: {e}")
+              sys.exit(1)
+
+          summary = data["choices"][0]["message"]["content"].strip()
+          print("\nGenerated summary:\n" + summary)
+
+          # ── 3. Update CLAUDE.md ──────────────────────────────────────────────
+          with open("CLAUDE.md", "r") as f:
+              content = f.read()
+
+          new_section = f"## Recent Changes\n\n{summary}\n"
+
+          # Replace existing section (everything up to the next ## heading)
+          pattern = r"## Recent Changes\n.*?(?=\n## |\Z)"
+          if re.search(pattern, content, re.DOTALL):
+              content = re.sub(pattern, new_section.rstrip("\n"), content, count=1, flags=re.DOTALL)
+          else:
+              # Insert after the first heading line ("# CLAUDE.md\n")
+              idx = content.index("\n") + 1
+              content = content[:idx] + "\n" + new_section + "\n" + content[idx:]
+
+          with open("CLAUDE.md", "w") as f:
+              f.write(content)
+
+          print("\nCLAUDE.md updated successfully.")
+          PYEOF
+
+      - name: Commit and push
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add CLAUDE.md
+          git diff --staged --quiet && echo "Nothing changed." && exit 0
+          git commit -m "docs: update Recent Changes in CLAUDE.md [skip ci]"
+          git push
