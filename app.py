@@ -4016,7 +4016,7 @@ function locateMe() {{
             }} else if (isFirefox) {{
                 steps = 'Firefox: click the <b>🔒</b> icon left of the URL → <b>Connection secure</b> → clear the Location permission block, then reload.';
             }} else {{
-                steps = 'Open your browser\'s site settings for this page, set Location to <b>Allow</b>, then reload.';
+                steps = 'Open your browser site settings for this page, set Location to <b>Allow</b>, then reload.';
             }}
             _showLocNote('Location is blocked for this site.<br>' + steps, true);
             return;
