@@ -3982,50 +3982,73 @@ function presetThermal() {{
 
 // ── LOCATE ME ─────────────────────────────────────────────
 let _userMarker = null;
+function _showLocNote(msg, isError) {{
+    document.querySelectorAll('.loc-note').forEach(n => n.remove());
+    const note = document.createElement('div');
+    note.className = 'loc-note';
+    note.style.cssText = `position:fixed;bottom:80px;left:50%;transform:translateX(-50%);
+        z-index:200;padding:12px 20px;font-size:11px;max-width:460px;text-align:center;
+        font-family:Inter,sans-serif;line-height:1.6;
+        background:${{isError ? 'rgba(255,60,60,0.12)' : 'rgba(88,191,255,0.12)'}};
+        border:1px solid ${{isError ? 'rgba(255,80,80,0.4)' : 'rgba(88,191,255,0.3)'}};
+        color:${{isError ? '#ffc0c0' : '#a8d8ff'}};`;
+    note.innerHTML = msg;
+    document.body.appendChild(note);
+    setTimeout(() => note.remove(), 8000);
+}}
+
 function locateMe() {{
     if (!navigator.geolocation) {{
-        alert('Geolocation is not supported by your browser.');
+        _showLocNote('Geolocation is not supported by this browser.', true);
         return;
     }}
-    navigator.geolocation.getCurrentPosition(
-        (pos) => {{
-            const lat = pos.coords.latitude;
-            const lng = pos.coords.longitude;
-            // Fly to user location
-            map.flyTo({{ center: [lng, lat], zoom: 8, duration: 1800 }});
-            // Place/move user marker
-            if (_userMarker) _userMarker.remove();
-            const el = document.createElement('div');
-            el.style.cssText = `
-                width: 16px; height: 16px; border-radius: 50%;
-                background: #58bfff; border: 3px solid #fff;
-                box-shadow: 0 0 0 4px rgba(88,191,255,0.3), 0 0 16px rgba(88,191,255,0.6);
-            `;
-            _userMarker = new mapboxgl.Marker({{ element: el }})
-                .setLngLat([lng, lat])
-                .addTo(map);
-            // Remove the prompt if still showing
-            const prompt = document.getElementById('location-prompt');
-            if (prompt) prompt.remove();
-        }},
-        (err) => {{
-            let msg;
-            if (err.code === 1) {{
-                msg = 'Location access was denied. Click the 🔒 icon in your browser address bar and allow location, then try again.';
-            }} else if (err.code === 2) {{
-                msg = 'Your location could not be determined. Try again or use the threat analysis panel to search manually.';
+    // Check permission state first so we can give useful guidance
+    (navigator.permissions
+        ? navigator.permissions.query({{ name: 'geolocation' }})
+        : Promise.resolve({{ state: 'prompt' }})
+    ).then(status => {{
+        if (status.state === 'denied') {{
+            const isChrome = navigator.userAgent.indexOf('Chrome') > -1;
+            const isFirefox = navigator.userAgent.indexOf('Firefox') > -1;
+            let steps;
+            if (isChrome) {{
+                steps = 'Chrome: click the <b>ⓘ</b> icon left of the URL → <b>Site settings</b> → set Location to <b>Allow</b>, then reload.';
+            }} else if (isFirefox) {{
+                steps = 'Firefox: click the <b>🔒</b> icon left of the URL → <b>Connection secure</b> → clear the Location permission block, then reload.';
             }} else {{
-                msg = 'Location request timed out. Try again.';
+                steps = 'Open your browser\'s site settings for this page, set Location to <b>Allow</b>, then reload.';
             }}
-            // Show inline notice instead of blocking alert
-            const note = document.createElement('div');
-            note.style.cssText = 'position:fixed;bottom:80px;left:50%;transform:translateX(-50%);z-index:200;background:rgba(255,80,80,0.15);border:1px solid rgba(255,80,80,0.4);color:#ffc0c0;padding:10px 18px;font-size:11px;max-width:420px;text-align:center;font-family:Inter,sans-serif;backdrop-filter:blur(4px);';
-            note.textContent = msg;
-            document.body.appendChild(note);
-            setTimeout(() => note.remove(), 6000);
-        }},
-        {{ timeout: 15000, enableHighAccuracy: false }}
-    );
+            _showLocNote('Location is blocked for this site.<br>' + steps, true);
+            return;
+        }}
+        navigator.geolocation.getCurrentPosition(
+            (pos) => {{
+                const lat = pos.coords.latitude;
+                const lng = pos.coords.longitude;
+                map.flyTo({{ center: [lng, lat], zoom: 8, duration: 1800 }});
+                if (_userMarker) _userMarker.remove();
+                const el = document.createElement('div');
+                el.style.cssText = `width:16px;height:16px;border-radius:50%;
+                    background:#58bfff;border:3px solid #fff;
+                    box-shadow:0 0 0 4px rgba(88,191,255,0.3),0 0 16px rgba(88,191,255,0.6);`;
+                _userMarker = new mapboxgl.Marker({{ element: el }})
+                    .setLngLat([lng, lat]).addTo(map);
+                const prompt = document.getElementById('location-prompt');
+                if (prompt) prompt.remove();
+                document.querySelectorAll('.loc-note').forEach(n => n.remove());
+            }},
+            (err) => {{
+                const msgs = [
+                    '',
+                    'Location access was denied. See instructions above to enable it.',
+                    'Your location could not be determined. Try again or search manually.',
+                    'Location request timed out. Try again.'
+                ];
+                _showLocNote(msgs[err.code] || 'Location unavailable.', true);
+            }},
+            {{ timeout: 15000, enableHighAccuracy: false }}
+        );
+    }});
 }}
 
 // ── SEVERITY BAR ──────────────────────────────────────────
