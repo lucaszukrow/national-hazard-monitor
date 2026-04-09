@@ -4011,18 +4011,22 @@ function _showLocNote(msg, isError) {{
 }}
 
 function locateMe() {{
+    console.log('[locateMe] called, geolocation:', !!navigator.geolocation);
     if (!navigator.geolocation) {{
         _showLocNote('Geolocation not supported by this browser.', true);
         return;
     }}
     document.getElementById('location-prompt')?.remove();
     _showLocNote('Requesting your location...', false);
+    document.getElementById('address-input').value = 'Requesting location...';
 
     navigator.geolocation.getCurrentPosition(
         (pos) => {{
+            console.log('[locateMe] GPS success:', pos.coords.latitude, pos.coords.longitude);
             _showLocNote('Got GPS — loading place name...', false);
             const lat = pos.coords.latitude;
             const lng = pos.coords.longitude;
+            document.getElementById('address-input').value = lat.toFixed(4) + ', ' + lng.toFixed(4);
 
             // Place blue marker immediately
             map.flyTo({{ center: [lng, lat], zoom: 8, duration: 1800 }});
@@ -4055,10 +4059,12 @@ function locateMe() {{
             }});
         }},
         (err) => {{
+            console.log('[locateMe] GPS error code:', err.code, err.message);
+            document.getElementById('address-input').value = 'Error code: ' + err.code;
             const msgs = {{
-                1: 'Location blocked. To enable: click the lock/info icon in your browser address bar → Site settings → allow Location.',
-                2: 'Could not determine your location. Try searching an address manually.',
-                3: 'Location request timed out. Try again.'
+                1: 'Location blocked (code 1). Chrome site settings show Allow but macOS may still block it — check System Preferences → Privacy & Security → Location Services → enable Chrome.',
+                2: 'Could not determine your location (code 2). Try searching an address manually.',
+                3: 'Location request timed out (code 3). Try again.'
             }};
             _showLocNote(msgs[err.code] || 'Location unavailable (code ' + err.code + ').', true);
         }},
