@@ -1031,9 +1031,9 @@ def run_update():
                     "earthquakes":      len(earthquakes.get("features", [])),
                     "active_storms":    len(storms),
                     "wildfires":        len(fires),
-                    "river_gauges":     len(state.get("river_gauges", {}).get("features", [])),
-                    "volcanoes":        len(state.get("volcanoes", {}).get("features", [])),
-                    "drought":          len(state.get("drought", {}).get("features", [])),
+                    "river_gauges":     len(river_gauges.get("features", [])),
+                    "volcanoes":        len(volcanoes.get("features", [])),
+                    "drought":          len(drought.get("features", [])),
                     "affected_counties": affected
                 }
             })
@@ -1901,6 +1901,29 @@ def mapbox_map():
             min-width: 40px; display: inline-block; vertical-align: middle;
         }}
 
+        /* ── STAT DELTAS ────────────────────────────────── */
+        .stat-delta {{
+            font-size: 10px; font-weight: 700; letter-spacing: 0.5px;
+            font-family: 'Space Grotesk', sans-serif;
+            transition: opacity 0.3s;
+        }}
+        .stat-delta:empty {{ display: none; }}
+        .stat-delta.up   {{ color: #ff716c; }}
+        .stat-delta.down {{ color: #00e676; }}
+
+        /* ── BASEMAP BUTTONS ─────────────────────────────── */
+        .bm-btn {{
+            background: rgba(88,191,255,0.06);
+            border: 1px solid rgba(88,191,255,0.15);
+            color: rgba(255,255,255,0.5);
+            font-size: 10px; padding: 5px 4px;
+            cursor: pointer; border-radius: 4px;
+            font-family: 'Inter', sans-serif;
+            transition: all 0.15s; text-align: center;
+        }}
+        .bm-btn:hover {{ background: rgba(88,191,255,0.15); color: #a8d8ff; }}
+        .bm-btn.active {{ background: rgba(88,191,255,0.22); border-color: rgba(88,191,255,0.5); color: #58bfff; }}
+
         /* ── SEVERITY BAR ───────────────────────────────── */
         #severity-bar {{
             position: fixed; top: 0; left: 0; right: 0; z-index: 200;
@@ -2185,24 +2208,28 @@ def mapbox_map():
             <span style="font-size:9px;color:#a0acbd;font-weight:700;letter-spacing:2px;text-transform:uppercase;">Active Warnings</span>
             <div class="flex items-baseline gap-2 mt-1">
                 <span id="stat-warnings" class="skel" style="font-family:'Space Grotesk',sans-serif;font-size:26px;font-weight:700;color:#dde9fb;">—</span>
+                <span id="delta-warnings" class="stat-delta"></span>
             </div>
         </div>
         <div class="stat-card glass-panel p-3 relative cursor-pointer transition-all" style="border-left:3px solid rgba(88,191,255,0.7);">
             <span style="font-size:9px;color:#a0acbd;font-weight:700;letter-spacing:2px;text-transform:uppercase;">Seismic M2.5+</span>
             <div class="flex items-baseline gap-2 mt-1">
                 <span id="stat-eq" class="skel" style="font-family:'Space Grotesk',sans-serif;font-size:26px;font-weight:700;color:#dde9fb;">—</span>
+                <span id="delta-eq" class="stat-delta"></span>
             </div>
         </div>
         <div class="stat-card glass-panel p-3 relative cursor-pointer transition-all" style="border-left:3px solid rgba(249,115,22,0.7);">
             <span style="font-size:9px;color:#a0acbd;font-weight:700;letter-spacing:2px;text-transform:uppercase;">Thermal Sites</span>
             <div class="flex items-baseline gap-2 mt-1">
                 <span id="stat-fires" class="skel" style="font-family:'Space Grotesk',sans-serif;font-size:26px;font-weight:700;color:#dde9fb;">—</span>
+                <span id="delta-fires" class="stat-delta"></span>
             </div>
         </div>
         <div class="stat-card glass-panel p-3 relative cursor-pointer transition-all" style="border-left:3px solid rgba(172,137,255,0.7);">
             <span style="font-size:9px;color:#a0acbd;font-weight:700;letter-spacing:2px;text-transform:uppercase;">SPC Outlook</span>
             <div class="flex items-baseline gap-2 mt-1">
                 <span id="stat-spc" class="skel" style="font-family:'Space Grotesk',sans-serif;font-size:26px;font-weight:700;color:#dde9fb;">—</span>
+                <span id="delta-spc" class="stat-delta"></span>
             </div>
         </div>
         <div class="stat-card glass-panel p-3 relative cursor-pointer transition-all" style="border-left:3px solid rgba(245,158,11,0.7);">
@@ -2527,12 +2554,18 @@ function setupLayers() {{
         const sigMap = {{'W':'Warning','A':'Watch','Y':'Advisory','S':'Statement'}};
         const sig = sigMap[p.sig] || p.sig || '';
         const name = (PHENOM_NAMES[phenom] || phenom) + ' ' + sig;
-        showPopup('⚠ ' + name, {{
-            'Phenomenon': phenom,
-            'Significance': sig,
-            'WFO': p.wfo || 'N/A',
-            'Product': p.prod_type || 'N/A'
-        }}, e);
+        const rows = {{ 'Issued by': p.wfo || 'N/A' }};
+        if (p.expires) {{
+            try {{
+                const exp = new Date(p.expires);
+                if (!isNaN(exp)) rows['Expires'] = exp.toLocaleString([],
+                    {{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}});
+            }} catch(e) {{}}
+        }}
+        if (p.event) rows['Event'] = p.event;
+        if (p.headline) rows['Headline'] = p.headline.length > 90 ? p.headline.slice(0,90) + '…' : p.headline;
+        if (p.areaDesc) rows['Area'] = p.areaDesc.length > 80 ? p.areaDesc.slice(0,80) + '…' : p.areaDesc;
+        showPopup('⚠ ' + name, rows, e);
     }});
     map.on('click', 'spc-fill', (e) => {{
         const p = e.features[0].properties;
@@ -3074,7 +3107,7 @@ function setupLayers() {{
         return btn;
     }}
 
-    toggleList.appendChild(makeToggle('⚠ Active Warnings', ['warnings-fill','warnings-line'], true));
+    toggleList.appendChild(makeToggle('⚠ Active Warnings', ['warnings-fill','warnings-outline'], true));
     toggleList.appendChild(makeToggle('⛈ SPC Outlook', ['spc-fill','spc-outline'], false));
     toggleList.appendChild(makeToggle('🔴 Earthquakes', 'eq-circles', false));
     toggleList.appendChild(makeToggle('🔥 Fire Detections', 'fire-points', false));
@@ -3092,6 +3125,30 @@ function setupLayers() {{
     toggleList.appendChild(makeToggle('🏠 Shelters', 'shelter-circles', false));
     toggleList.appendChild(makeToggle('🏜 Drought', 'drought-fill', false));
     toggleList.appendChild(makeToggle('🏛 FEMA Disasters', 'fema-disasters', false));
+    // ── BASEMAP SWITCHER ─────────────────────────────────
+    const basemapSection = document.createElement('div');
+    basemapSection.style.cssText = 'margin-top:10px;border-top:1px solid rgba(88,191,255,0.15);padding-top:8px;';
+    basemapSection.innerHTML = `
+        <div style="font-size:9px;color:#58bfff;font-weight:700;letter-spacing:2px;margin-bottom:6px;">BASEMAP</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;">
+            <button class="bm-btn active" data-style="mapbox://styles/mapbox/dark-v11">🌑 Dark</button>
+            <button class="bm-btn" data-style="mapbox://styles/mapbox/light-v11">☀️ Light</button>
+            <button class="bm-btn" data-style="mapbox://styles/mapbox/satellite-streets-v12">🛰 Satellite</button>
+            <button class="bm-btn" data-style="mapbox://styles/mapbox/streets-v12">🗺 Streets</button>
+            <button class="bm-btn" data-style="mapbox://styles/mapbox/outdoors-v12">🌲 Outdoors</button>
+            <button class="bm-btn" data-style="mapbox://styles/mapbox/navigation-night-v1">🚗 Nav Night</button>
+        </div>
+    `;
+    basemapSection.querySelectorAll('.bm-btn').forEach(btn => {{
+        btn.onclick = () => {{
+            const styleUrl = btn.getAttribute('data-style');
+            map.setStyle(styleUrl);
+            map.once('style.load', setupLayers);
+            basemapSection.querySelectorAll('.bm-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+        }};
+    }});
+    toggleContainer.appendChild(basemapSection);
     document.body.appendChild(toggleContainer);
 
 
@@ -3102,6 +3159,7 @@ function setupLayers() {{
     let _latestFires       = null;
     let _latestStorms      = null;
     let _dataLoaded        = false;
+    let _prevSummary       = null;
 
     function loadData() {{
         fetch('/api/summary').then(r => r.json()).then(data => {{
@@ -3112,6 +3170,23 @@ function setupLayers() {{
             document.getElementById('stat-eq').textContent       = s.earthquakes    || 0;
             document.getElementById('stat-fires').textContent    = s.wildfires      || 0;
             document.getElementById('stat-spc').textContent      = s.spc_zones      || 0;
+
+            // ── DELTA INDICATORS ──────────────────────────────
+            if (_prevSummary) {{
+                const applyDelta = (id, newVal, oldVal) => {{
+                    const el = document.getElementById(id);
+                    if (!el) return;
+                    const d = (newVal || 0) - (oldVal || 0);
+                    if (d === 0) {{ el.textContent = ''; el.className = 'stat-delta'; return; }}
+                    el.textContent = (d > 0 ? '+' : '') + d;
+                    el.className   = 'stat-delta ' + (d > 0 ? 'up' : 'down');
+                }};
+                applyDelta('delta-warnings', s.warnings_count, _prevSummary.warnings_count);
+                applyDelta('delta-eq',       s.earthquakes,    _prevSummary.earthquakes);
+                applyDelta('delta-fires',    s.wildfires,      _prevSummary.wildfires);
+                applyDelta('delta-spc',      s.spc_zones,      _prevSummary.spc_zones);
+            }}
+            _prevSummary = Object.assign({{}}, s);
 
             // Remove skeleton shimmer on first successful data load
             if (!_dataLoaded) {{
@@ -3957,7 +4032,7 @@ function showResults(threats) {{
 // ── SIDEBAR PRESETS ───────────────────────────────────────
 // All layers that presets can show/hide
 const _ALL_PRESET_LAYERS = [
-    'warnings-fill','warnings-line',
+    'warnings-fill','warnings-outline',
     'spc-fill','spc-outline',
     'eq-circles',
     'fire-points','fire-perimeter-fill','fire-perimeter-outline',
@@ -3977,7 +4052,7 @@ function _setPresetLayers(show) {{
 // ATMOS: NWS warnings + SPC outlook + hurricanes + lightning
 function presetAtmos() {{
     _setPresetLayers([
-        'warnings-fill','warnings-line',
+        'warnings-fill','warnings-outline',
         'spc-fill','spc-outline',
         'storm-cone','storm-cone-outline','storm-track',
         'lightning-strikes'
