@@ -1868,9 +1868,94 @@ def mapbox_map():
         .hover\:border-primary:hover{{border-color:#58bfff}}
         @media(min-width:768px){{.md\:flex-row{{flex-direction:row}}}}
         .glow-purple{{box-shadow:0 0 20px rgba(172,137,255,.3)}}
+
+        /* ── SKELETON LOADING ───────────────────────────── */
+        @keyframes shimmer {{
+            0%   {{ background-position: -200% 0; }}
+            100% {{ background-position:  200% 0; }}
+        }}
+        .skel {{
+            background: linear-gradient(90deg,rgba(88,191,255,0.07) 25%,rgba(88,191,255,0.18) 50%,rgba(88,191,255,0.07) 75%);
+            background-size: 200% 100%;
+            animation: shimmer 1.4s ease-in-out infinite;
+            border-radius: 4px;
+            color: transparent !important;
+            min-width: 40px; display: inline-block; vertical-align: middle;
+        }}
+
+        /* ── SEVERITY BAR ───────────────────────────────── */
+        #severity-bar {{
+            position: fixed; top: 0; left: 0; right: 0; z-index: 200;
+            height: 3px; background: rgba(10,20,35,0.6); pointer-events: none;
+        }}
+        #severity-fill {{
+            height: 100%; width: 0%;
+            transition: width 2s cubic-bezier(.4,0,.2,1), background-color 1s;
+            background: #00CC66;
+        }}
+        #severity-label {{
+            position: fixed; top: 8px; right: 96px; z-index: 201;
+            font-size: 8px; font-weight: 700; letter-spacing: 2px;
+            color: rgba(255,255,255,0.35); text-transform: uppercase;
+            pointer-events: none; font-family: 'Inter', sans-serif;
+            transition: color 1s;
+        }}
+        @keyframes sev-pulse {{
+            0%,100% {{ opacity: 1; }} 50% {{ opacity: 0.4; }}
+        }}
+        .sev-critical {{ animation: sev-pulse 1s ease-in-out infinite; }}
+
+        /* ── LIGHT MODE ─────────────────────────────────── */
+        body.light {{ background: #e4edf5; color: #1a2332; }}
+        body.light .glass-panel {{
+            background: rgba(228,240,252,0.92);
+            border-color: rgba(88,191,255,0.25);
+            color: #1a2332;
+        }}
+        body.light nav.sidebar {{
+            background: rgba(228,240,252,0.96) !important;
+            border-color: rgba(88,191,255,0.2) !important;
+        }}
+        body.light header {{
+            background: rgba(228,240,252,0.92) !important;
+        }}
+        body.light .nav-btn {{ color: #3d5066; }}
+        body.light .nav-btn:hover {{ background: rgba(88,191,255,0.15); color: #0080cc; }}
+        body.light .nav-btn.active {{ color: #0080cc; border-left-color: #0080cc !important; }}
+        body.light #popup {{
+            background: rgba(228,240,252,0.99) !important;
+            border-color: rgba(88,191,255,0.4);
+            color: #1a2332;
+        }}
+        body.light #sitrep-overlay > div {{ background: rgba(228,240,252,0.97) !important; color: #1a2332; }}
+        body.light #severity-bar {{ background: rgba(180,200,220,0.6); }}
+
+        /* ── KEYBOARD SHORTCUTS MODAL ───────────────────── */
+        #shortcuts-modal {{
+            display: none; position: fixed; inset: 0; z-index: 300;
+            background: rgba(4,15,27,0.85); backdrop-filter: blur(6px);
+            align-items: center; justify-content: center;
+        }}
+        #shortcuts-modal.open {{ display: flex; }}
+        .shortcut-row {{
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 9px 0; border-bottom: 1px solid rgba(88,191,255,0.08);
+            gap: 32px; font-size: 12px; color: #a0acbd;
+        }}
+        .shortcut-row:last-child {{ border-bottom: none; }}
+        kbd {{
+            background: rgba(88,191,255,0.1); border: 1px solid rgba(88,191,255,0.3);
+            border-radius: 4px; padding: 2px 9px; font-size: 11px;
+            font-family: monospace; color: #58bfff; font-weight: 700;
+            min-width: 28px; text-align: center; display: inline-block;
+        }}
     </style>
 </head>
 <body class="bg-background text-on-surface overflow-hidden select-none">
+
+<!-- Severity bar — top 3px strip, color reflects current national threat level -->
+<div id="severity-bar"><div id="severity-fill"></div></div>
+<div id="severity-label">THREAT LEVEL CALCULATING...</div>
 
 <div id="map"></div>
 
@@ -1935,6 +2020,13 @@ def mapbox_map():
     <button id="sitrep-btn" onclick="openSitrep()" class="flex items-center gap-2 bg-primary px-4 py-1.5 text-on-primary font-bold text-[10px] tracking-widest uppercase hover:bg-primary-dim transition-all" style="font-family:'Space Grotesk',sans-serif;">
         <span class="material-symbols-outlined" style="font-size:16px;">psychology</span>
         AI SITUATION REPORT
+    </button>
+    <div style="width:1px;height:24px;background:rgba(61,73,87,0.5);"></div>
+    <button id="theme-btn" onclick="toggleTheme()" title="Toggle light / dark (D)" style="background:transparent;border:none;color:#64748b;cursor:pointer;padding:4px;display:flex;align-items:center;" class="hover:text-primary transition-all">
+        <span class="material-symbols-outlined" style="font-size:20px;">dark_mode</span>
+    </button>
+    <button onclick="openShortcuts()" title="Keyboard shortcuts (?)" style="background:transparent;border:none;color:#64748b;cursor:pointer;padding:4px;display:flex;align-items:center;" class="hover:text-primary transition-all">
+        <span class="material-symbols-outlined" style="font-size:20px;">keyboard</span>
     </button>
 </header>
 
@@ -2014,43 +2106,66 @@ def mapbox_map():
     </div>
 </div>
 
+<!-- Keyboard shortcuts modal -->
+<div id="shortcuts-modal" onclick="if(event.target===this)closeShortcuts()">
+    <div class="glass-panel" style="min-width:340px;max-width:440px;padding:28px 32px;position:relative;">
+        <div class="corner-bracket corner-tl"></div>
+        <div class="corner-bracket corner-br"></div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
+            <div style="display:flex;align-items:center;gap:10px;">
+                <span class="material-symbols-outlined text-primary" style="font-size:20px;">keyboard</span>
+                <span style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:16px;color:#dde9fb;">Keyboard Shortcuts</span>
+            </div>
+            <button onclick="closeShortcuts()" style="background:transparent;border:none;color:#64748b;cursor:pointer;font-size:18px;line-height:1;">&times;</button>
+        </div>
+        <div class="shortcut-row"><span>Toggle layer panel</span><kbd>L</kbd></div>
+        <div class="shortcut-row"><span>AI Situation Report</span><kbd>S</kbd></div>
+        <div class="shortcut-row"><span>Refresh data now</span><kbd>R</kbd></div>
+        <div class="shortcut-row"><span>Fullscreen</span><kbd>F</kbd></div>
+        <div class="shortcut-row"><span>Light / dark mode</span><kbd>D</kbd></div>
+        <div class="shortcut-row"><span>Threat analysis panel</span><kbd>W</kbd></div>
+        <div class="shortcut-row"><span>Close / dismiss</span><kbd>Esc</kbd></div>
+        <div class="shortcut-row"><span>This help screen</span><kbd>?</kbd></div>
+    </div>
+</div>
+
 <!-- Stat Cards + Hazard Chart (top-left) -->
 <div class="absolute z-10 pointer-events-auto" style="left:96px;top:72px;width:370px;">
     <div class="grid grid-cols-2 gap-3">
         <div class="stat-card glass-panel p-3 relative cursor-pointer transition-all" style="border-left:3px solid rgba(255,113,108,0.7);">
             <span style="font-size:9px;color:#a0acbd;font-weight:700;letter-spacing:2px;text-transform:uppercase;">Active Warnings</span>
             <div class="flex items-baseline gap-2 mt-1">
-                <span id="stat-warnings" style="font-family:'Space Grotesk',sans-serif;font-size:26px;font-weight:700;color:#dde9fb;">—</span>
+                <span id="stat-warnings" class="skel" style="font-family:'Space Grotesk',sans-serif;font-size:26px;font-weight:700;color:#dde9fb;">—</span>
             </div>
         </div>
         <div class="stat-card glass-panel p-3 relative cursor-pointer transition-all" style="border-left:3px solid rgba(88,191,255,0.7);">
             <span style="font-size:9px;color:#a0acbd;font-weight:700;letter-spacing:2px;text-transform:uppercase;">Seismic M2.5+</span>
             <div class="flex items-baseline gap-2 mt-1">
-                <span id="stat-eq" style="font-family:'Space Grotesk',sans-serif;font-size:26px;font-weight:700;color:#dde9fb;">—</span>
+                <span id="stat-eq" class="skel" style="font-family:'Space Grotesk',sans-serif;font-size:26px;font-weight:700;color:#dde9fb;">—</span>
             </div>
         </div>
         <div class="stat-card glass-panel p-3 relative cursor-pointer transition-all" style="border-left:3px solid rgba(249,115,22,0.7);">
             <span style="font-size:9px;color:#a0acbd;font-weight:700;letter-spacing:2px;text-transform:uppercase;">Thermal Sites</span>
             <div class="flex items-baseline gap-2 mt-1">
-                <span id="stat-fires" style="font-family:'Space Grotesk',sans-serif;font-size:26px;font-weight:700;color:#dde9fb;">—</span>
+                <span id="stat-fires" class="skel" style="font-family:'Space Grotesk',sans-serif;font-size:26px;font-weight:700;color:#dde9fb;">—</span>
             </div>
         </div>
         <div class="stat-card glass-panel p-3 relative cursor-pointer transition-all" style="border-left:3px solid rgba(172,137,255,0.7);">
             <span style="font-size:9px;color:#a0acbd;font-weight:700;letter-spacing:2px;text-transform:uppercase;">SPC Outlook</span>
             <div class="flex items-baseline gap-2 mt-1">
-                <span id="stat-spc" style="font-family:'Space Grotesk',sans-serif;font-size:26px;font-weight:700;color:#dde9fb;">—</span>
+                <span id="stat-spc" class="skel" style="font-family:'Space Grotesk',sans-serif;font-size:26px;font-weight:700;color:#dde9fb;">—</span>
             </div>
         </div>
         <div class="stat-card glass-panel p-3 relative cursor-pointer transition-all" style="border-left:3px solid rgba(245,158,11,0.7);">
             <span style="font-size:9px;color:#a0acbd;font-weight:700;letter-spacing:2px;text-transform:uppercase;">Counties Alert</span>
             <div class="flex items-baseline gap-2 mt-1">
-                <span id="stat-counties" style="font-family:'Space Grotesk',sans-serif;font-size:26px;font-weight:700;color:#dde9fb;">—</span>
+                <span id="stat-counties" class="skel" style="font-family:'Space Grotesk',sans-serif;font-size:26px;font-weight:700;color:#dde9fb;">—</span>
             </div>
         </div>
         <div class="stat-card glass-panel p-3 relative cursor-pointer transition-all" style="border-left:3px solid rgba(88,191,255,0.3);">
             <span style="font-size:9px;color:#a0acbd;font-weight:700;letter-spacing:2px;text-transform:uppercase;">Population Exp.</span>
             <div class="flex items-baseline gap-2 mt-1">
-                <span id="stat-pop" style="font-family:'Space Grotesk',sans-serif;font-size:26px;font-weight:700;color:#dde9fb;">—</span>
+                <span id="stat-pop" class="skel" style="font-family:'Space Grotesk',sans-serif;font-size:26px;font-weight:700;color:#dde9fb;">—</span>
             </div>
         </div>
     </div>
@@ -2982,6 +3097,7 @@ function setupLayers() {{
     let _latestEarthquakes = null;
     let _latestFires       = null;
     let _latestStorms      = null;
+    let _dataLoaded        = false;
 
     function loadData() {{
         fetch('/api/summary').then(r => r.json()).then(data => {{
@@ -2992,6 +3108,13 @@ function setupLayers() {{
             document.getElementById('stat-eq').textContent       = s.earthquakes    || 0;
             document.getElementById('stat-fires').textContent    = s.wildfires      || 0;
             document.getElementById('stat-spc').textContent      = s.spc_zones      || 0;
+
+            // Remove skeleton shimmer on first successful data load
+            if (!_dataLoaded) {{
+                _dataLoaded = true;
+                document.querySelectorAll('.skel').forEach(el => el.classList.remove('skel'));
+            }}
+            updateSeverityBar(s);
             if (document.getElementById('stat-counties')) {{
                 document.getElementById('stat-counties').textContent = s.counties_count || 0;
             }}
@@ -3828,6 +3951,63 @@ function showResults(threats) {{
         </div>`;
     }}).join('');
 }}
+
+// ── SEVERITY BAR ──────────────────────────────────────────
+function updateSeverityBar(s) {{
+    const raw = (s.warnings_count || 0) * 0.18
+              + (s.earthquakes    || 0) * 0.05
+              + (s.active_storms  || 0) * 4
+              + (s.spc_zones      || 0) * 0.03
+              + (s.river_gauges   || 0) * 0.12;
+    const pct  = Math.min(100, Math.round(raw));
+    const fill  = document.getElementById('severity-fill');
+    const label = document.getElementById('severity-label');
+    if (!fill || !label) return;
+    let color, text;
+    if      (pct >= 70) {{ color = '#FF2D2D'; text = 'CRITICAL'; }}
+    else if (pct >= 45) {{ color = '#FF8C00'; text = 'ELEVATED'; }}
+    else if (pct >= 20) {{ color = '#FFCC00'; text = 'ADVISORY'; }}
+    else                {{ color = '#00CC66'; text = 'NORMAL';   }}
+    fill.style.width = pct + '%';
+    fill.style.backgroundColor = color;
+    fill.classList.toggle('sev-critical', pct >= 70);
+    label.textContent = text + ' · ' + pct + '%';
+    label.style.color = pct >= 45 ? color : 'rgba(255,255,255,0.35)';
+}}
+
+// ── LIGHT / DARK THEME TOGGLE ─────────────────────────────
+function toggleTheme() {{
+    const isLight = document.body.classList.toggle('light');
+    localStorage.setItem('nhm-theme', isLight ? 'light' : 'dark');
+    const icon = document.getElementById('theme-btn')?.querySelector('.material-symbols-outlined');
+    if (icon) icon.textContent = isLight ? 'light_mode' : 'dark_mode';
+}}
+// Apply saved theme on load
+(function() {{
+    if (localStorage.getItem('nhm-theme') === 'light') {{
+        document.body.classList.add('light');
+        const icon = document.getElementById('theme-btn')?.querySelector('.material-symbols-outlined');
+        if (icon) icon.textContent = 'light_mode';
+    }}
+}})();
+
+// ── KEYBOARD SHORTCUTS MODAL ──────────────────────────────
+function openShortcuts()  {{ document.getElementById('shortcuts-modal').classList.add('open'); }}
+function closeShortcuts() {{ document.getElementById('shortcuts-modal').classList.remove('open'); }}
+
+// ── KEYBOARD SHORTCUTS ────────────────────────────────────
+document.addEventListener('keydown', function(e) {{
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+    const key = e.key;
+    if      (key === 'l' || key === 'L') {{ toggleLayerPanel(); }}
+    else if (key === 's' || key === 'S') {{ if (!document.getElementById('sitrep-overlay').classList.contains('open')) openSitrep(); }}
+    else if (key === 'r' || key === 'R') {{ loadData(); }}
+    else if (key === 'f' || key === 'F') {{ document.documentElement.requestFullscreen?.(); }}
+    else if (key === 'd' || key === 'D') {{ toggleTheme(); }}
+    else if (key === 'w' || key === 'W') {{ focusThreatPanel(); }}
+    else if (key === '?')                {{ openShortcuts(); }}
+    else if (key === 'Escape')           {{ closeSitrep(); closeShortcuts(); }}
+}});
 
 function clearSearch(resetInput=true) {{
     if (searchMarker) {{ searchMarker.remove(); searchMarker = null; }}
