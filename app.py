@@ -2039,7 +2039,7 @@ def mapbox_map():
 ">
     <span class="material-symbols-outlined" style="color:#58bfff;font-size:20px;">location_on</span>
     <span style="font-size:12px;color:#dde9fb;">Show active warnings near your location?</span>
-    <button onclick="locateMe();document.getElementById('location-prompt').remove()" style="
+    <button onclick="locateMe()" style="
         background:#58bfff; border:none; color:#000d18; font-weight:700;
         font-size:10px; letter-spacing:1px; padding:6px 14px; cursor:pointer;
         font-family:'Space Grotesk',sans-serif; text-transform:uppercase;
@@ -4156,7 +4156,7 @@ function clearSearch(resetInput=true) {{
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "SAMEORIGIN"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+    response.headers["Permissions-Policy"] = "geolocation=(self), microphone=(), camera=()"
     return response
 
 app.layout = html.Div(
