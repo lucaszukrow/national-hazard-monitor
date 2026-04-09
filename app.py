@@ -1739,7 +1739,7 @@ def mapbox_map():
     <script src="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
     <link href="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.css" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+    <!-- Chart.js removed — hazard overview now uses inline HTML bars -->
     <style>
         /* ── 1. RESET & BASE ─────────────────────────────── */
         * {{ margin: 0; padding: 0; box-sizing: border-box; }}
@@ -1868,6 +1868,24 @@ def mapbox_map():
         .hover\:border-primary:hover{{border-color:#58bfff}}
         @media(min-width:768px){{.md\:flex-row{{flex-direction:row}}}}
         .glow-purple{{box-shadow:0 0 20px rgba(172,137,255,.3)}}
+
+        /* ── HAZARD ROWS ─────────────────────────────────── */
+        .haz-row {{
+            display: flex; align-items: center; justify-content: space-between;
+            font-size: 11px; color: rgba(255,255,255,0.6); padding: 2px 0;
+        }}
+        .haz-row .haz-bar-wrap {{
+            flex: 1; margin: 0 8px; height: 3px;
+            background: rgba(255,255,255,0.07); border-radius: 2px; overflow: hidden;
+        }}
+        .haz-bar {{
+            height: 100%; border-radius: 2px; width: 0%;
+            transition: width 0.8s cubic-bezier(.4,0,.2,1);
+        }}
+        .haz-count {{
+            font-family: 'Space Grotesk', sans-serif; font-weight: 700;
+            font-size: 12px; min-width: 28px; text-align: right;
+        }}
 
         /* ── SKELETON LOADING ───────────────────────────── */
         @keyframes shimmer {{
@@ -2200,14 +2218,18 @@ def mapbox_map():
             </div>
         </div>
     </div>
-    <div class="glass-panel mt-3 p-4" style="position:relative;">
+    <div class="glass-panel mt-3 p-3" style="position:relative;">
         <div class="corner-bracket corner-tl"></div>
         <div class="corner-bracket corner-br"></div>
-        <div class="flex justify-between items-center mb-3">
-            <h3 style="font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#dde9fb;">Hazard Overview</h3>
-            <span class="material-symbols-outlined text-primary" style="font-size:16px;">equalizer</span>
+        <div style="font-size:9px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#a0acbd;margin-bottom:10px;">Live Hazard Counts</div>
+        <div id="hazard-rows" style="display:flex;flex-direction:column;gap:6px;">
+            <div class="haz-row" data-key="warnings_count"  data-color="#FF716C">⚠ Active Warnings</div>
+            <div class="haz-row" data-key="earthquakes"     data-color="#58bfff">🔴 Earthquakes M2.5+</div>
+            <div class="haz-row" data-key="wildfires"       data-color="#FF8C00">🔥 Fire Detections</div>
+            <div class="haz-row" data-key="river_gauges"    data-color="#00BFFF">🌊 Flood Gauges</div>
+            <div class="haz-row" data-key="active_storms"   data-color="#FF6600">🌀 Active Storms</div>
+            <div class="haz-row" data-key="volcanoes"       data-color="#FF4500">🌋 Volcano Alerts</div>
         </div>
-        <canvas id="hazard-chart" height="110"></canvas>
     </div>
 </div>
 
@@ -2394,20 +2416,7 @@ function setupLayers() {{
     // Guard: don't add sources if already added
     if (map.getSource('warnings')) return;
 
-    // ── 3D TERRAIN + ATMOSPHERE ─────────────────────
-    map.addSource('mapbox-dem', {{
-        type: 'raster-dem',
-        url: 'mapbox://mapbox.mapbox-terrain-dem-v1',
-        tileSize: 512, maxzoom: 14
-    }});
-    map.setTerrain({{ source: 'mapbox-dem', exaggeration: 1.8 }});
-    map.setFog({{
-        color: 'rgba(0,4,12,0.95)',
-        'high-color': '#000a1a',
-        'horizon-blend': 0.12,
-        'space-color': '#000000',
-        'star-intensity': 0.15
-    }});
+    // 3D terrain removed — was forcing full 3D render mode on every frame
 
     // ── SPC OUTLOOK ─────────────────────────────────
     map.addSource('spc', {{ type: 'geojson', data: '/api/spc' }});
@@ -2822,7 +2831,7 @@ function setupLayers() {{
     map.addSource('air_quality', {{ type: 'geojson', data: '/api/air_quality' }});
     map.addLayer({{
         id: 'aqi-circles', type: 'circle', source: 'air_quality',
-        layout: {{ visibility: 'visible' }},
+        layout: {{ visibility: 'none' }},
         paint: {{
             'circle-color': [
                 'step', ['get', 'aqi'],
@@ -3345,48 +3354,36 @@ function copySitrep() {{
     }});
 }}
 
-// ── HAZARD OVERVIEW CHART ─────────────────────────
-let _hazardChart = null;
-function initHazardChart() {{
-    const ctx = document.getElementById('hazard-chart').getContext('2d');
-    _hazardChart = new Chart(ctx, {{
-        type: 'bar',
-        data: {{
-            labels: ['Warnings','Quakes','Fires','Gauges','Volcanoes','Drought'],
-            datasets: [{{
-                data: [0, 0, 0, 0, 0, 0],
-                backgroundColor: [
-                    'rgba(255,80,80,0.7)', 'rgba(0,180,255,0.7)', 'rgba(255,80,0,0.7)',
-                    'rgba(0,200,255,0.7)', 'rgba(255,136,0,0.7)', 'rgba(180,120,60,0.7)'
-                ],
-                borderRadius: 4, borderWidth: 0,
-            }}]
-        }},
-        options: {{
-            responsive: true, maintainAspectRatio: false,
-            plugins: {{ legend: {{ display: false }} }},
-            scales: {{
-                x: {{ ticks: {{ color: 'rgba(255,255,255,0.45)', font: {{ size: 8 }} }}, grid: {{ display: false }} }},
-                y: {{ ticks: {{ color: 'rgba(255,255,255,0.45)', font: {{ size: 8 }}, maxTicksLimit: 4 }},
-                      grid: {{ color: 'rgba(255,255,255,0.05)' }} }}
-            }}
+// ── HAZARD OVERVIEW ROWS (replaces Chart.js) ──────
+function updateHazardChart(summary) {{
+    const s = summary || {{}};
+    const keys = {{
+        warnings_count: s.warnings_count || 0,
+        earthquakes:    s.earthquakes    || 0,
+        wildfires:      s.wildfires      || 0,
+        river_gauges:   s.river_gauges   || 0,
+        active_storms:  s.active_storms  || 0,
+        volcanoes:      s.volcanoes      || 0,
+    }};
+    const maxVal = Math.max(1, ...Object.values(keys));
+    document.querySelectorAll('.haz-row').forEach(row => {{
+        const key   = row.dataset.key;
+        const color = row.dataset.color;
+        const val   = keys[key] || 0;
+        const pct   = Math.round((val / maxVal) * 100);
+        // Build inner HTML once if not already built
+        if (!row.querySelector('.haz-bar-wrap')) {{
+            const label = row.textContent.trim();
+            row.innerHTML = `
+                <span style="white-space:nowrap;">${{label}}</span>
+                <div class="haz-bar-wrap"><div class="haz-bar" style="background:${{color}};"></div></div>
+                <span class="haz-count" style="color:${{color}};">0</span>`;
         }}
+        row.querySelector('.haz-bar').style.width = pct + '%';
+        row.querySelector('.haz-count').textContent = val;
+        row.style.opacity = val > 0 ? '1' : '0.35';
     }});
 }}
-function updateHazardChart(summary) {{
-    if (!_hazardChart) return;
-    const s = summary || {{}};
-    _hazardChart.data.datasets[0].data = [
-        s.warnings_count || 0,
-        s.earthquakes    || 0,
-        s.wildfires      || 0,
-        s.river_gauges   || 0,
-        s.volcanoes      || 0,
-        s.drought        || 0,
-    ];
-    _hazardChart.update('none');
-}}
-initHazardChart();
 
 // ── ADDRESS SEARCH & THREAT ANALYSIS ─────────────
 const MAPBOX_TOKEN_JS = mapboxgl.accessToken;
