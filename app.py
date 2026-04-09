@@ -1967,39 +1967,69 @@ def mapbox_map():
 
 <!-- Sidebar nav -->
 <nav class="sidebar fixed left-0 top-0 h-full z-40 flex flex-col items-center py-8" style="background:rgba(2,6,23,0.95);border-right:1px solid rgba(88,191,255,0.1);width:80px;">
-    <div class="mb-10 flex flex-col items-center gap-2">
-        <span style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:12px;color:#58bfff;">M.C.</span>
+    <div class="mb-8 flex flex-col items-center gap-2">
         <div style="width:32px;height:32px;background:rgba(88,191,255,0.15);display:flex;align-items:center;justify-content:center;">
             <span class="material-symbols-outlined" style="font-size:20px;color:#58bfff;">radar</span>
         </div>
     </div>
     <div class="flex flex-col flex-1" style="gap:4px;width:100%;">
-        <button id="btn-layers" onclick="toggleLayerPanel();setSidebarActive(this)" class="nav-btn active" title="Toggle Layers">
+        <!-- LAYERS — toggle the layer control panel -->
+        <button id="btn-layers" onclick="toggleLayerPanel();setSidebarActive(this)" class="nav-btn active" title="Layer controls (L)">
             <span class="material-symbols-outlined" style="font-size:22px;">layers</span>
             <span class="nav-label">LAYERS</span>
         </button>
-        <button id="btn-seismic" onclick="flyToEarthquakes();setSidebarActive(this)" class="nav-btn" title="Fly to earthquakes">
-            <span class="material-symbols-outlined" style="font-size:22px;">tsunami</span>
-            <span class="nav-label">SEISMIC</span>
+        <!-- NEAR ME — fly to user location and highlight nearby warnings -->
+        <button id="btn-nearme" onclick="locateMe();setSidebarActive(this)" class="nav-btn" title="Show warnings near me">
+            <span class="material-symbols-outlined" style="font-size:22px;">my_location</span>
+            <span class="nav-label">NEAR ME</span>
         </button>
-        <button id="btn-thermal" onclick="flyToFires();setSidebarActive(this)" class="nav-btn" title="Fly to fire activity">
-            <span class="material-symbols-outlined" style="font-size:22px;">local_fire_department</span>
-            <span class="nav-label">THERMAL</span>
-        </button>
-        <button id="btn-atmos" onclick="flyToWarnings();setSidebarActive(this)" class="nav-btn" title="Fly to active warnings">
+        <!-- ATMOS — preset: warnings + SPC + storms + lightning -->
+        <button id="btn-atmos" onclick="presetAtmos();setSidebarActive(this)" class="nav-btn" title="Atmospheric hazards">
             <span class="material-symbols-outlined" style="font-size:22px;">cyclone</span>
             <span class="nav-label">ATMOS</span>
         </button>
-        <button id="btn-risk" onclick="focusThreatPanel();setSidebarActive(this)" class="nav-btn" title="Run threat analysis">
-            <span class="material-symbols-outlined" style="font-size:22px;">warning</span>
+        <!-- SEISMIC — preset: earthquakes only -->
+        <button id="btn-seismic" onclick="presetSeismic();setSidebarActive(this)" class="nav-btn" title="Seismic activity">
+            <span class="material-symbols-outlined" style="font-size:22px;">tsunami</span>
+            <span class="nav-label">SEISMIC</span>
+        </button>
+        <!-- THERMAL — preset: fire detections + perimeters -->
+        <button id="btn-thermal" onclick="presetThermal();setSidebarActive(this)" class="nav-btn" title="Fire & thermal hazards">
+            <span class="material-symbols-outlined" style="font-size:22px;">local_fire_department</span>
+            <span class="nav-label">THERMAL</span>
+        </button>
+        <!-- RISK — open threat analysis panel -->
+        <button id="btn-risk" onclick="focusThreatPanel();setSidebarActive(this)" class="nav-btn" title="Threat analysis (W)">
+            <span class="material-symbols-outlined" style="font-size:22px;">crisis_alert</span>
             <span class="nav-label">RISK</span>
         </button>
     </div>
-    <button onclick="document.documentElement.requestFullscreen?.()" class="nav-btn mt-auto" title="Fullscreen">
+    <button onclick="document.documentElement.requestFullscreen?.()" class="nav-btn mt-auto" title="Fullscreen (F)">
         <span class="material-symbols-outlined" style="font-size:22px;">fullscreen</span>
         <span class="nav-label">EXPAND</span>
     </button>
 </nav>
+
+<!-- Location prompt banner -->
+<div id="location-prompt" style="
+    position:fixed; bottom:80px; left:50%; transform:translateX(-50%);
+    z-index:50; display:flex; align-items:center; gap:12px;
+    background:rgba(4,15,27,0.95); border:1px solid rgba(88,191,255,0.3);
+    padding:12px 20px; backdrop-filter:blur(4px);
+    box-shadow:0 4px 24px rgba(0,0,0,0.5);
+    font-family:'Inter',sans-serif; white-space:nowrap;
+">
+    <span class="material-symbols-outlined" style="color:#58bfff;font-size:20px;">location_on</span>
+    <span style="font-size:12px;color:#dde9fb;">Show active warnings near your location?</span>
+    <button onclick="locateMe();document.getElementById('location-prompt').remove()" style="
+        background:#58bfff; border:none; color:#000d18; font-weight:700;
+        font-size:10px; letter-spacing:1px; padding:6px 14px; cursor:pointer;
+        font-family:'Space Grotesk',sans-serif; text-transform:uppercase;
+    ">ALLOW</button>
+    <button onclick="document.getElementById('location-prompt').remove()" style="
+        background:transparent; border:none; color:#64748b; cursor:pointer; font-size:18px; padding:0 4px;
+    ">&times;</button>
+</div>
 
 <!-- Top Header -->
 <header class="fixed top-0 left-1/2 -translate-x-1/2 z-50 flex items-center gap-6 bg-slate-900/60 backdrop-blur-xl mt-3 w-fit border border-primary/20 px-6 py-2" style="box-shadow:0 0 15px rgba(88,191,255,0.1);">
@@ -2124,6 +2154,7 @@ def mapbox_map():
         <div class="shortcut-row"><span>Fullscreen</span><kbd>F</kbd></div>
         <div class="shortcut-row"><span>Light / dark mode</span><kbd>D</kbd></div>
         <div class="shortcut-row"><span>Threat analysis panel</span><kbd>W</kbd></div>
+        <div class="shortcut-row"><span>Near me / locate</span><kbd>N</kbd></div>
         <div class="shortcut-row"><span>Close / dismiss</span><kbd>Esc</kbd></div>
         <div class="shortcut-row"><span>This help screen</span><kbd>?</kbd></div>
     </div>
@@ -2382,6 +2413,7 @@ function setupLayers() {{
     map.addSource('spc', {{ type: 'geojson', data: '/api/spc' }});
     map.addLayer({{
         id: 'spc-fill', type: 'fill', source: 'spc',
+        layout: {{ visibility: 'none' }},
         paint: {{
             'fill-color': [
                 'match', ['get', 'LABEL'],
@@ -2395,6 +2427,7 @@ function setupLayers() {{
     }});
     map.addLayer({{
         id: 'spc-outline', type: 'line', source: 'spc',
+        layout: {{ visibility: 'none' }},
         paint: {{
             'line-color': ['match', ['get', 'LABEL'],
                 'TSTM', '#76FF7A', 'MRGL', '#009000',
@@ -2445,6 +2478,7 @@ function setupLayers() {{
     map.addSource('earthquakes', {{ type: 'geojson', data: '/api/earthquakes' }});
     map.addLayer({{
         id: 'eq-circles', type: 'circle', source: 'earthquakes',
+        layout: {{ visibility: 'none' }},
         paint: {{
             'circle-color': [
                 'step', ['get', 'mag'],
@@ -2460,58 +2494,11 @@ function setupLayers() {{
         }}
     }});
 
-    // ── WILDFIRE HEATMAP (low zoom) ──────────────────
-    map.addSource('fires-heat', {{ type: 'geojson', data: '/api/fires' }});
-    map.addLayer({{
-        id: 'fire-heat', type: 'heatmap', source: 'fires-heat',
-        maxzoom: 8,
-        paint: {{
-            'heatmap-weight': ['interpolate', ['linear'], ['get', 'frp'], 0, 0, 200, 1],
-            'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 0, 1, 8, 4],
-            'heatmap-color': ['interpolate', ['linear'], ['heatmap-density'],
-                0,   'rgba(0,0,0,0)',
-                0.15,'rgba(255,140,0,0.3)',
-                0.4, 'rgba(255,69,0,0.65)',
-                0.7, 'rgba(255,0,0,0.85)',
-                1,   '#FF1400'
-            ],
-            'heatmap-radius': ['interpolate', ['linear'], ['zoom'], 0, 20, 8, 40],
-            'heatmap-opacity': ['interpolate', ['linear'], ['zoom'], 5, 1, 8, 0]
-        }}
-    }});
-
-    // ── WILDFIRES ────────────────────────────────────
-    map.addSource('fires', {{ type: 'geojson', data: '/api/fires',
-        cluster: true, clusterMaxZoom: 7, clusterRadius: 40
-    }});
-    map.addLayer({{
-        id: 'fire-clusters', type: 'circle', source: 'fires',
-        filter: ['has', 'point_count'],
-        paint: {{
-            'circle-color': [
-                'step', ['get', 'point_count'],
-                '#FF8C00', 25, '#FF4500', 100, '#FF0000'
-            ],
-            'circle-radius': [
-                'step', ['get', 'point_count'],
-                16, 25, 22, 100, 30
-            ],
-            'circle-stroke-color': '#FFD700',
-            'circle-stroke-width': 2
-        }}
-    }});
-    map.addLayer({{
-        id: 'fire-cluster-count', type: 'symbol', source: 'fires',
-        filter: ['has', 'point_count'],
-        layout: {{
-            'text-field': ['get', 'point_count_abbreviated'],
-            'text-size': 11, 'text-font': ['DIN Offc Pro Bold', 'Arial Unicode MS Bold']
-        }},
-        paint: {{ 'text-color': '#fff' }}
-    }});
+    // ── WILDFIRES (simple points, no clustering or heatmap) ──
+    map.addSource('fires', {{ type: 'geojson', data: '/api/fires' }});
     map.addLayer({{
         id: 'fire-points', type: 'circle', source: 'fires',
-        filter: ['!', ['has', 'point_count']],
+        layout: {{ visibility: 'none' }},
         paint: {{
             'circle-color': [
                 'step', ['get', 'frp'],
@@ -2563,12 +2550,8 @@ function setupLayers() {{
             'Confidence': p.confidence || 'N/A'
         }}, e);
     }});
-    map.on('click', 'fire-clusters', (e) => {{
-        map.flyTo({{ center: e.lngLat, zoom: map.getZoom() + 2 }});
-    }});
-
     // Cursor changes for all clickable layers
-    ['warnings-fill','spc-fill','eq-circles','fire-points','fire-clusters'].forEach(layer => {{
+    ['warnings-fill','spc-fill','eq-circles','fire-points'].forEach(layer => {{
         map.on('mouseenter', layer, () => map.getCanvas().style.cursor = 'pointer');
         map.on('mouseleave', layer, () => map.getCanvas().style.cursor = '');
     }});
@@ -2577,6 +2560,7 @@ function setupLayers() {{
     map.addSource('counties', {{ type: 'geojson', data: '/api/counties' }});
     map.addLayer({{
         id: 'counties-fill', type: 'fill', source: 'counties',
+        layout: {{ visibility: 'none' }},
         paint: {{
             'fill-color': [
                 'interpolate', ['linear'],
@@ -2592,6 +2576,7 @@ function setupLayers() {{
     }});
     map.addLayer({{
         id: 'counties-outline', type: 'line', source: 'counties',
+        layout: {{ visibility: 'none' }},
         paint: {{
             'line-color': '#FF6600',
             'line-width': 1.5,
@@ -2686,6 +2671,7 @@ function setupLayers() {{
         id: 'nexrad-layer',
         type: 'raster',
         source: 'nexrad',
+        layout: {{ visibility: 'none' }},
         paint: {{ 'raster-opacity': 0.7 }}
     }});
 
@@ -2708,6 +2694,7 @@ function setupLayers() {{
     map.addSource('lightning', {{ type: 'geojson', data: '/api/lightning' }});
     map.addLayer({{
         id: 'lightning-strikes', type: 'circle', source: 'lightning',
+        layout: {{ visibility: 'none' }},
         paint: {{
             'circle-color': '#FFFF00',
             'circle-radius': 5,
@@ -2732,6 +2719,7 @@ function setupLayers() {{
     map.addSource('fire_perimeters', {{ type: 'geojson', data: '/api/fire_perimeters' }});
     map.addLayer({{
         id: 'fire-perimeter-fill', type: 'fill', source: 'fire_perimeters',
+        layout: {{ visibility: 'none' }},
         paint: {{
             'fill-color': 'rgba(255,69,0,0.25)',
             'fill-outline-color': '#FF4500'
@@ -2739,6 +2727,7 @@ function setupLayers() {{
     }});
     map.addLayer({{
         id: 'fire-perimeter-outline', type: 'line', source: 'fire_perimeters',
+        layout: {{ visibility: 'none' }},
         paint: {{
             'line-color': '#FF4500',
             'line-width': 2,
@@ -2762,6 +2751,7 @@ function setupLayers() {{
     map.addLayer({{
         id: 'storm-cone', type: 'fill', source: 'storms',
         filter: ['==', ['get', 'layer'], 'cone'],
+        layout: {{ visibility: 'none' }},
         paint: {{
             'fill-color': '#FF6600',
             'fill-opacity': 0.18
@@ -2770,11 +2760,13 @@ function setupLayers() {{
     map.addLayer({{
         id: 'storm-cone-outline', type: 'line', source: 'storms',
         filter: ['==', ['get', 'layer'], 'cone'],
+        layout: {{ visibility: 'none' }},
         paint: {{ 'line-color': '#FF6600', 'line-width': 2, 'line-opacity': 0.7 }}
     }});
     map.addLayer({{
         id: 'storm-track', type: 'circle', source: 'storms',
         filter: ['==', ['get', 'layer'], 'track'],
+        layout: {{ visibility: 'none' }},
         paint: {{
             'circle-color': '#FF6600',
             'circle-radius': 7,
@@ -2863,7 +2855,7 @@ function setupLayers() {{
     map.addSource('river_gauges', {{ type: 'geojson', data: '/api/river_gauges' }});
     map.addLayer({{
         id: 'river-gauges', type: 'circle', source: 'river_gauges',
-        layout: {{ visibility: 'visible' }},
+        layout: {{ visibility: 'none' }},
         paint: {{
             'circle-color': ['get', 'color'],
             'circle-radius': 7,
@@ -2888,7 +2880,7 @@ function setupLayers() {{
     map.addSource('volcanoes', {{ type: 'geojson', data: '/api/volcanoes' }});
     map.addLayer({{
         id: 'volcano-circles', type: 'circle', source: 'volcanoes',
-        layout: {{ visibility: 'visible' }},
+        layout: {{ visibility: 'none' }},
         paint: {{
             'circle-color': ['get', 'color'],
             'circle-radius': 9,
@@ -3073,20 +3065,21 @@ function setupLayers() {{
         return btn;
     }}
 
-    toggleList.appendChild(makeToggle('🔥 Fire Detections', ['fire-clusters','fire-cluster-count','fire-points'], true));
-    toggleList.appendChild(makeToggle('🔥 Fire Heatmap', 'fire-heat', false));
-    toggleList.appendChild(makeToggle('🔥 Fire Perimeters', 'fire-perimeter-fill', true));
-    toggleList.appendChild(makeToggle('⚡ Storm Reports', 'lightning-strikes', true));
-    toggleList.appendChild(makeToggle('🌀 Hurricanes', 'storm-track', true));
-    toggleList.appendChild(makeToggle('NEXRAD Radar', 'nexrad-layer', true));
-    toggleList.appendChild(makeToggle('GOES Infrared', 'goes-ir-layer', false));
-    toggleList.appendChild(makeToggle('Affected Counties', 'counties-fill', true));
+    toggleList.appendChild(makeToggle('⚠ Active Warnings', ['warnings-fill','warnings-line'], true));
+    toggleList.appendChild(makeToggle('⛈ SPC Outlook', ['spc-fill','spc-outline'], false));
+    toggleList.appendChild(makeToggle('🔴 Earthquakes', 'eq-circles', false));
+    toggleList.appendChild(makeToggle('🔥 Fire Detections', 'fire-points', false));
+    toggleList.appendChild(makeToggle('🔥 Fire Perimeters', ['fire-perimeter-fill','fire-perimeter-outline'], false));
+    toggleList.appendChild(makeToggle('⚡ Storm Reports', 'lightning-strikes', false));
+    toggleList.appendChild(makeToggle('🌀 Hurricanes', ['storm-cone','storm-cone-outline','storm-track'], false));
+    toggleList.appendChild(makeToggle('📡 NEXRAD Radar', 'nexrad-layer', false));
+    toggleList.appendChild(makeToggle('🛰 GOES Infrared', 'goes-ir-layer', false));
+    toggleList.appendChild(makeToggle('🗺 Affected Counties', ['counties-fill','counties-outline'], false));
     toggleList.appendChild(makeToggle('🏥 Hospitals', 'infra-normal', false));
     toggleList.appendChild(makeToggle('⚠ At-Risk Infra', 'infra-at-risk', false));
-    toggleList.appendChild(makeToggle('🏷 Infra Labels', 'infra-labels', false));
     toggleList.appendChild(makeToggle('💨 Air Quality', 'aqi-circles', false));
-    toggleList.appendChild(makeToggle('🌊 Flood Gauges', 'river-gauges', true));
-    toggleList.appendChild(makeToggle('🌋 Volcanoes', 'volcano-circles', true));
+    toggleList.appendChild(makeToggle('🌊 Flood Gauges', 'river-gauges', false));
+    toggleList.appendChild(makeToggle('🌋 Volcanoes', 'volcano-circles', false));
     toggleList.appendChild(makeToggle('🏠 Shelters', 'shelter-circles', false));
     toggleList.appendChild(makeToggle('🏜 Drought', 'drought-fill', false));
     toggleList.appendChild(makeToggle('🏛 FEMA Disasters', 'fema-disasters', false));
@@ -3149,7 +3142,7 @@ function setupLayers() {{
             // while keeping total stall to ~225ms instead of 600ms
             if (map.loaded()) {{
                 const t = Date.now();
-                const srcs = ['warnings','spc','earthquakes','fires','fires-heat','counties',
+                const srcs = ['warnings','spc','earthquakes','fires','counties',
                     'lightning','fire_perimeters','storms','fema_disasters',
                     'river_gauges','volcanoes','drought','shelters','air_quality'];
                 srcs.forEach((src, i) => {{
@@ -3952,6 +3945,79 @@ function showResults(threats) {{
     }}).join('');
 }}
 
+// ── SIDEBAR PRESETS ───────────────────────────────────────
+// All layers that presets can show/hide
+const _ALL_PRESET_LAYERS = [
+    'warnings-fill','warnings-line',
+    'spc-fill','spc-outline',
+    'eq-circles',
+    'fire-points','fire-perimeter-fill','fire-perimeter-outline',
+    'lightning-strikes',
+    'storm-cone','storm-cone-outline','storm-track',
+    'nexrad-layer','river-gauges','volcano-circles',
+    'counties-fill','counties-outline'
+];
+function _setPresetLayers(show) {{
+    _ALL_PRESET_LAYERS.forEach(id => {{
+        if (map.getLayer(id)) {{
+            map.setLayoutProperty(id, 'visibility',
+                show.includes(id) ? 'visible' : 'none');
+        }}
+    }});
+}}
+// ATMOS: NWS warnings + SPC outlook + hurricanes + lightning
+function presetAtmos() {{
+    _setPresetLayers([
+        'warnings-fill','warnings-line',
+        'spc-fill','spc-outline',
+        'storm-cone','storm-cone-outline','storm-track',
+        'lightning-strikes'
+    ]);
+}}
+// SEISMIC: earthquakes only
+function presetSeismic() {{
+    _setPresetLayers(['eq-circles']);
+}}
+// THERMAL: fire detections + fire perimeters
+function presetThermal() {{
+    _setPresetLayers(['fire-points','fire-perimeter-fill','fire-perimeter-outline']);
+}}
+
+// ── LOCATE ME ─────────────────────────────────────────────
+let _userMarker = null;
+function locateMe() {{
+    if (!navigator.geolocation) {{
+        alert('Geolocation is not supported by your browser.');
+        return;
+    }}
+    navigator.geolocation.getCurrentPosition(
+        (pos) => {{
+            const lat = pos.coords.latitude;
+            const lng = pos.coords.longitude;
+            // Fly to user location
+            map.flyTo({{ center: [lng, lat], zoom: 8, duration: 1800 }});
+            // Place/move user marker
+            if (_userMarker) _userMarker.remove();
+            const el = document.createElement('div');
+            el.style.cssText = `
+                width: 16px; height: 16px; border-radius: 50%;
+                background: #58bfff; border: 3px solid #fff;
+                box-shadow: 0 0 0 4px rgba(88,191,255,0.3), 0 0 16px rgba(88,191,255,0.6);
+            `;
+            _userMarker = new mapboxgl.Marker({{ element: el }})
+                .setLngLat([lng, lat])
+                .addTo(map);
+            // Remove the prompt if still showing
+            const prompt = document.getElementById('location-prompt');
+            if (prompt) prompt.remove();
+        }},
+        () => {{
+            alert('Could not get your location. Please check browser permissions.');
+        }},
+        {{ timeout: 10000, enableHighAccuracy: false }}
+    );
+}}
+
 // ── SEVERITY BAR ──────────────────────────────────────────
 function updateSeverityBar(s) {{
     const raw = (s.warnings_count || 0) * 0.18
@@ -4005,6 +4071,7 @@ document.addEventListener('keydown', function(e) {{
     else if (key === 'f' || key === 'F') {{ document.documentElement.requestFullscreen?.(); }}
     else if (key === 'd' || key === 'D') {{ toggleTheme(); }}
     else if (key === 'w' || key === 'W') {{ focusThreatPanel(); }}
+    else if (key === 'n' || key === 'N') {{ locateMe(); }}
     else if (key === '?')                {{ openShortcuts(); }}
     else if (key === 'Escape')           {{ closeSitrep(); closeShortcuts(); }}
 }});
