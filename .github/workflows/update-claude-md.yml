@@ -57,11 +57,16 @@ jobs:
               "max_tokens": 500,
           }).encode()
 
+          api_key = os.environ.get("GROQ_API_KEY", "").strip()
+          if not api_key:
+              print("GROQ_API_KEY is not set — skipping update.")
+              sys.exit(0)
+
           req = urllib.request.Request(
               "https://api.groq.com/openai/v1/chat/completions",
               data=payload,
               headers={
-                  "Authorization": f"Bearer {os.environ['GROQ_API_KEY']}",
+                  "Authorization": f"Bearer {api_key}",
                   "Content-Type": "application/json",
               },
           )
@@ -69,9 +74,13 @@ jobs:
           try:
               with urllib.request.urlopen(req, timeout=30) as resp:
                   data = json.loads(resp.read())
+          except urllib.error.HTTPError as e:
+              body = e.read().decode("utf-8", errors="replace")
+              print(f"Groq API HTTP {e.code}: {body}")
+              sys.exit(0)  # don't fail the workflow on API errors
           except Exception as e:
               print(f"Groq API call failed: {e}")
-              sys.exit(1)
+              sys.exit(0)
 
           summary = data["choices"][0]["message"]["content"].strip()
           print("\nGenerated summary:\n" + summary)
