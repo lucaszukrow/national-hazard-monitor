@@ -1748,7 +1748,7 @@ def mapbox_map():
 
         /* ── 2. COMPONENT CLASSES ────────────────────────── */
         .material-symbols-outlined {{ font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24; display: inline-block; line-height: 1; vertical-align: middle; }}
-        .glass-panel {{ background: rgba(21,39,57,0.6); backdrop-filter: blur(20px); border: 1px solid rgba(88,191,255,0.1); }}
+        .glass-panel {{ background: rgba(21,39,57,0.82); backdrop-filter: blur(4px); border: 1px solid rgba(88,191,255,0.1); }}
         .corner-bracket {{ position: absolute; width: 8px; height: 8px; border-color: #58bfff; border-style: solid; border-width: 0; }}
         .corner-tl {{ top: -1px; left: -1px; border-top-width: 2px; border-left-width: 2px; }}
         .corner-tr {{ top: -1px; right: -1px; border-top-width: 2px; border-right-width: 2px; }}
@@ -1771,7 +1771,7 @@ def mapbox_map():
             background: linear-gradient(135deg, rgba(0,8,20,0.98) 0%, rgba(0,20,40,0.98) 100%);
             border: 1px solid rgba(88,191,255,0.3); padding: 16px 18px;
             font-size: 12px; min-width: 220px; max-width: 280px;
-            backdrop-filter: blur(20px); display: none;
+            backdrop-filter: blur(4px); display: none;
             box-shadow: 0 0 40px rgba(0,0,0,0.6), 0 0 20px rgba(88,191,255,0.1);
             animation: popup-in 0.2s ease-out;
         }}
@@ -1786,7 +1786,7 @@ def mapbox_map():
         .popup-row {{ display: flex; justify-content: space-between; align-items: center; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.04); }}
         .popup-key {{ color: rgba(255,255,255,0.4); font-size: 10px; letter-spacing: 1px; text-transform: uppercase; }}
         .popup-val {{ color: white; font-weight: 600; font-size: 12px; }}
-        .mapboxgl-ctrl-group {{ background: rgba(11,27,42,0.92) !important; border: 1px solid rgba(88,191,255,0.15) !important; backdrop-filter: blur(20px) !important; border-radius: 0 !important; }}
+        .mapboxgl-ctrl-group {{ background: rgba(11,27,42,0.96) !important; border: 1px solid rgba(88,191,255,0.15) !important; border-radius: 0 !important; }}
         .mapboxgl-ctrl-group button {{ background: transparent !important; }}
         .mapboxgl-ctrl-group button span {{ filter: invert(1) brightness(0.7); }}
         .mapboxgl-ctrl-group button:hover span {{ filter: invert(1); }}
@@ -1794,7 +1794,7 @@ def mapbox_map():
         #hover-tooltip {{
             position: absolute; z-index: 15; pointer-events: none;
             background: rgba(11,27,42,0.96); border: 1px solid rgba(88,191,255,0.3);
-            padding: 7px 12px; font-size: 11px; backdrop-filter: blur(16px);
+            padding: 7px 12px; font-size: 11px;
             display: none; box-shadow: 0 4px 20px rgba(0,0,0,0.6);
             white-space: nowrap; line-height: 1.6; color: #dde9fb;
         }}
@@ -1845,7 +1845,7 @@ def mapbox_map():
         .select-none{{user-select:none}}
         .transition-all{{transition:all 150ms cubic-bezier(.4,0,.2,1)}}
         .shadow-2xl{{box-shadow:0 25px 50px -12px rgba(0,0,0,.25)}}
-        .backdrop-blur-xl{{backdrop-filter:blur(24px)}}.backdrop-blur-2xl{{backdrop-filter:blur(40px)}}
+        .backdrop-blur-xl{{backdrop-filter:blur(6px)}}.backdrop-blur-2xl{{backdrop-filter:blur(8px)}}
         .bg-background{{background-color:#040f1b}}.text-on-surface{{color:#dde9fb}}.text-on-primary{{color:#000d18}}
         .text-primary{{color:#58bfff !important}}.text-slate-500{{color:#64748b}}.text-slate-400{{color:#94a3b8}}
         .bg-primary{{background-color:#58bfff}}.bg-error{{background-color:#ff716c}}
@@ -1905,8 +1905,8 @@ def mapbox_map():
         }}
         .sev-critical {{ animation: sev-pulse 1s ease-in-out infinite; }}
 
-        /* ── LIGHT MODE ─────────────────────────────────── */
-        body.light {{ background: #e4edf5; color: #1a2332; }}
+        /* ── LIGHT MODE — panels only, map stays dark ──── */
+        body.light {{ background: #040f1b; color: #1a2332; }}
         body.light .glass-panel {{
             background: rgba(228,240,252,0.92);
             border-color: rgba(88,191,255,0.25);
@@ -1933,7 +1933,7 @@ def mapbox_map():
         /* ── KEYBOARD SHORTCUTS MODAL ───────────────────── */
         #shortcuts-modal {{
             display: none; position: fixed; inset: 0; z-index: 300;
-            background: rgba(4,15,27,0.85); backdrop-filter: blur(6px);
+            background: rgba(4,15,27,0.88);
             align-items: center; justify-content: center;
         }}
         #shortcuts-modal.open {{ display: flex; }}
@@ -1966,7 +1966,7 @@ def mapbox_map():
 <div class="fixed bottom-4 right-4 w-6 h-6 border-b-2 border-r-2 border-primary/40 z-50 pointer-events-none"></div>
 
 <!-- Sidebar nav -->
-<nav class="sidebar fixed left-0 top-0 h-full z-40 flex flex-col items-center py-8" style="background:rgba(2,6,23,0.85);backdrop-filter:blur(24px);border-right:1px solid rgba(88,191,255,0.1);width:80px;">
+<nav class="sidebar fixed left-0 top-0 h-full z-40 flex flex-col items-center py-8" style="background:rgba(2,6,23,0.95);border-right:1px solid rgba(88,191,255,0.1);width:80px;">
     <div class="mb-10 flex flex-col items-center gap-2">
         <span style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:12px;color:#58bfff;">M.C.</span>
         <div style="width:32px;height:32px;background:rgba(88,191,255,0.15);display:flex;align-items:center;justify-content:center;">
@@ -2613,10 +2613,11 @@ function setupLayers() {{
     // ── INFRASTRUCTURE ────────────────────────────────
     map.addSource('infrastructure', {{ type: 'geojson', data: '/api/infrastructure' }});
 
-    // At-risk infrastructure — glowing red
+    // At-risk infrastructure — glowing red (off by default)
     map.addLayer({{
         id: 'infra-at-risk', type: 'circle', source: 'infrastructure',
         filter: ['==', ['get', 'at_risk'], true],
+        layout: {{ visibility: 'none' }},
         paint: {{
             'circle-color': '#FF0000',
             'circle-radius': 7,
@@ -2626,10 +2627,11 @@ function setupLayers() {{
         }}
     }});
 
-    // Normal infrastructure
+    // Normal infrastructure (off by default)
     map.addLayer({{
         id: 'infra-normal', type: 'circle', source: 'infrastructure',
         filter: ['==', ['get', 'at_risk'], false],
+        layout: {{ visibility: 'none' }},
         paint: {{
             'circle-color': ['get', 'color'],
             'circle-radius': 4,
@@ -2934,7 +2936,7 @@ function setupLayers() {{
     map.addSource('shelters', {{ type: 'geojson', data: '/api/shelters' }});
     map.addLayer({{
         id: 'shelter-circles', type: 'circle', source: 'shelters',
-        layout: {{ visibility: 'visible' }},
+        layout: {{ visibility: 'none' }},
         paint: {{
             'circle-color': '#00FF88',
             'circle-radius': 7,
@@ -3079,13 +3081,13 @@ function setupLayers() {{
     toggleList.appendChild(makeToggle('NEXRAD Radar', 'nexrad-layer', true));
     toggleList.appendChild(makeToggle('GOES Infrared', 'goes-ir-layer', false));
     toggleList.appendChild(makeToggle('Affected Counties', 'counties-fill', true));
-    toggleList.appendChild(makeToggle('🏥 Hospitals', 'infra-normal', true));
-    toggleList.appendChild(makeToggle('⚠ At-Risk Infra', 'infra-at-risk', true));
+    toggleList.appendChild(makeToggle('🏥 Hospitals', 'infra-normal', false));
+    toggleList.appendChild(makeToggle('⚠ At-Risk Infra', 'infra-at-risk', false));
     toggleList.appendChild(makeToggle('🏷 Infra Labels', 'infra-labels', false));
     toggleList.appendChild(makeToggle('💨 Air Quality', 'aqi-circles', false));
     toggleList.appendChild(makeToggle('🌊 Flood Gauges', 'river-gauges', true));
     toggleList.appendChild(makeToggle('🌋 Volcanoes', 'volcano-circles', true));
-    toggleList.appendChild(makeToggle('🏠 Shelters', 'shelter-circles', true));
+    toggleList.appendChild(makeToggle('🏠 Shelters', 'shelter-circles', false));
     toggleList.appendChild(makeToggle('🏜 Drought', 'drought-fill', false));
     toggleList.appendChild(makeToggle('🏛 FEMA Disasters', 'fema-disasters', false));
     document.body.appendChild(toggleContainer);
@@ -3157,10 +3159,8 @@ function setupLayers() {{
                         }}
                     }}, i * 15);
                 }});
-                // Infrastructure refreshes separately — can take up to 20s from Overpass
-                if (map.getSource('infrastructure')) {{
-                    setTimeout(() => map.getSource('infrastructure').setData('/api/infrastructure?t=' + t), srcs.length * 15);
-                }}
+                // Infrastructure intentionally NOT auto-refreshed — Overpass API
+                // takes up to 20s and the data changes rarely. Load once on first click.
             }}
 
             // If no data yet retry in 10 seconds
