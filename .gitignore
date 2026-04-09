@@ -1,0 +1,38 @@
+# Environment & secrets
+.env
+.env.*
+*.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+venv/
+.venv/
+env/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Runtime / cache
+/tmp/
+hazard_cache.json
+*.log
+
+# Jupyter
+.ipynb_checkpoints/

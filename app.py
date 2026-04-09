@@ -20,6 +20,7 @@ import time
 import datetime
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from collections import Counter
 import requests
 import folium
 from folium.plugins import MiniMap, Fullscreen
@@ -50,7 +51,7 @@ SPC_URL      = "https://www.spc.noaa.gov/products/outlook/day1otlk_cat.nolyr.geo
 USGS_EQ_URL  = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_day.geojson"
 NHC_URL      = "https://www.nhc.noaa.gov/CurrentStorms.json"
 FIRMS_KEY        = os.environ.get("FIRMS_KEY", "")
-FIRMS_URL        = f"https://firms.modaps.eosdis.nasa.gov/api/area/csv/{FIRMS_KEY}/VIIRS_SNPP_NRT/-125,24,-66,50/2"
+# Note: FIRMS URLs are built inside fetch_fires() so FIRMS_KEY is always current
 SENDGRID_API_KEY  = os.environ.get("SENDGRID_API_KEY", "")
 ALERT_EMAIL       = os.environ.get("ALERT_EMAIL", "")
 GROQ_API_KEY  = os.environ.get("GROQ_API_KEY", "")
@@ -211,14 +212,21 @@ if _startup_cache:
 # ─────────────────────────────────────────────
 # DATA DOWNLOAD FUNCTIONS
 # ─────────────────────────────────────────────
-def fetch_json(url, timeout=20):
-    try:
-        r = requests.get(url, timeout=timeout)
-        r.raise_for_status()
-        return r.json()
-    except Exception as e:
-        print(f"  WARNING: Failed to fetch {url}: {e}")
-        return None
+def fetch_json(url, timeout=20, retries=3):
+    """GET url, parse JSON. Retries up to `retries` times with exponential backoff."""
+    for attempt in range(retries):
+        try:
+            r = requests.get(url, timeout=timeout)
+            r.raise_for_status()
+            return r.json()
+        except Exception as e:
+            if attempt < retries - 1:
+                wait = 2 ** attempt  # 1s, 2s, 4s
+                print(f"  WARNING: {url} failed (attempt {attempt+1}/{retries}), retrying in {wait}s: {e}")
+                time.sleep(wait)
+            else:
+                print(f"  WARNING: Failed to fetch {url} after {retries} attempts: {e}")
+    return None
 
 def fetch_warnings():
     print("Downloading NWS warnings...")
@@ -905,6 +913,12 @@ def check_and_send_alerts(warnings, earthquakes, storms, affected):
             f"National Hazard Monitor\n"
         )
         send_alert_email(subject, body)
+
+    # Prevent unbounded memory growth — discard oldest ~half when over limit
+    if len(state["seen_alert_ids"]) > 10000:
+        excess = len(state["seen_alert_ids"]) - 5000
+        for _ in range(excess):
+            state["seen_alert_ids"].pop()
 
 
 # ─────────────────────────────────────────────
@@ -4177,7 +4191,6 @@ def update_ui(n, watchzone):
     # Bar chart
     bar_fig = go.Figure()
     if affected:
-        from collections import Counter
         phenom_counts = Counter(c.get("phenom","") for c in affected)
         labels = [phenom_names.get(p, p) for p in phenom_counts]
         colors_list = [hazard_colors.get(p, hazard_colors["default"]) for p in phenom_counts]
