@@ -4012,73 +4012,58 @@ function _showLocNote(msg, isError) {{
 
 function locateMe() {{
     if (!navigator.geolocation) {{
-        _showLocNote('Geolocation is not supported by this browser.', true);
+        _showLocNote('Geolocation not supported by this browser.', true);
         return;
     }}
-    // Check permission state first so we can give useful guidance
-    (navigator.permissions
-        ? navigator.permissions.query({{ name: 'geolocation' }})
-        : Promise.resolve({{ state: 'prompt' }})
-    ).then(status => {{
-        if (status.state === 'denied') {{
-            const isChrome = navigator.userAgent.indexOf('Chrome') > -1;
-            const isFirefox = navigator.userAgent.indexOf('Firefox') > -1;
-            let steps;
-            if (isChrome) {{
-                steps = 'Chrome: click the <b>ⓘ</b> icon left of the URL → <b>Site settings</b> → set Location to <b>Allow</b>, then reload.';
-            }} else if (isFirefox) {{
-                steps = 'Firefox: click the <b>🔒</b> icon left of the URL → <b>Connection secure</b> → clear the Location permission block, then reload.';
-            }} else {{
-                steps = 'Open your browser site settings for this page, set Location to <b>Allow</b>, then reload.';
-            }}
-            _showLocNote('Location is blocked for this site.<br>' + steps, true);
-            return;
-        }}
-        navigator.geolocation.getCurrentPosition(
-            async (pos) => {{
-                const lat = pos.coords.latitude;
-                const lng = pos.coords.longitude;
-                map.flyTo({{ center: [lng, lat], zoom: 8, duration: 1800 }});
-                if (_userMarker) _userMarker.remove();
-                const el = document.createElement('div');
-                el.style.cssText = `width:16px;height:16px;border-radius:50%;
-                    background:#58bfff;border:3px solid #fff;
-                    box-shadow:0 0 0 4px rgba(88,191,255,0.3),0 0 16px rgba(88,191,255,0.6);`;
-                _userMarker = new mapboxgl.Marker({{ element: el }})
-                    .setLngLat([lng, lat]).addTo(map);
-                document.getElementById('location-prompt')?.remove();
-                document.querySelectorAll('.loc-note').forEach(n => n.remove());
-                _showLocNote('📍 Location found — analyzing nearby threats...', false);
-                // Reverse-geocode for a place name and county (needed for NRI lookup)
-                let feature = null;
-                try {{
-                    const rg = await fetch('https://api.mapbox.com/geocoding/v5/mapbox.places/'
-                        + lng + ',' + lat
-                        + '.json?types=place,district,region&limit=1&access_token=' + MAPBOX_TOKEN_JS);
-                    const rgd = await rg.json();
-                    feature = rgd.features?.[0] || null;
-                }} catch(e) {{}}
+    document.getElementById('location-prompt')?.remove();
+    _showLocNote('Requesting your location...', false);
+
+    navigator.geolocation.getCurrentPosition(
+        (pos) => {{
+            _showLocNote('Got GPS — loading place name...', false);
+            const lat = pos.coords.latitude;
+            const lng = pos.coords.longitude;
+
+            // Place blue marker immediately
+            map.flyTo({{ center: [lng, lat], zoom: 8, duration: 1800 }});
+            if (_userMarker) _userMarker.remove();
+            const el = document.createElement('div');
+            el.style.cssText = 'width:16px;height:16px;border-radius:50%;background:#58bfff;border:3px solid #fff;box-shadow:0 0 0 4px rgba(88,191,255,0.3),0 0 16px rgba(88,191,255,0.6);';
+            _userMarker = new mapboxgl.Marker({{ element: el }}).setLngLat([lng, lat]).addTo(map);
+
+            // Reverse-geocode then run threat analysis
+            fetch('https://api.mapbox.com/geocoding/v5/mapbox.places/'
+                + lng + ',' + lat
+                + '.json?types=place,district,region&limit=1&access_token=' + MAPBOX_TOKEN_JS)
+            .then(r => r.json())
+            .then(rgd => {{
+                const feature = rgd.features?.[0] || null;
                 _gpsOverride = {{ lat, lng, feature }};
-                document.getElementById('address-input').value =
-                    feature ? feature.place_name.split(',').slice(0,2).join(',') : 'Your Location';
+                const label = feature
+                    ? feature.place_name.split(',').slice(0,2).join(',')
+                    : lat.toFixed(4) + ', ' + lng.toFixed(4);
+                document.getElementById('address-input').value = label;
+                _showLocNote('📍 ' + label + ' — analyzing threats...', false);
                 searchLocation();
-            }},
-            (err) => {{
-                let msg;
-                if (err.code === 1) {{
-                    const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
-                    msg = 'Location blocked. Check browser site permissions for this page'
-                        + (isMac ? ', or System Preferences → Privacy &amp; Security → Location Services.' : '.');
-                }} else if (err.code === 2) {{
-                    msg = 'Your location could not be determined. Try again or search an address manually.';
-                }} else {{
-                    msg = 'Location request timed out. Try again.';
-                }}
-                _showLocNote(msg, true);
-            }},
-            {{ timeout: 15000, enableHighAccuracy: false }}
-        );
-    }});
+            }})
+            .catch(() => {{
+                // Reverse geocode failed — run analysis with raw coords
+                _gpsOverride = {{ lat, lng, feature: null }};
+                document.getElementById('address-input').value = lat.toFixed(4) + ', ' + lng.toFixed(4);
+                _showLocNote('📍 Location found — analyzing nearby threats...', false);
+                searchLocation();
+            }});
+        }},
+        (err) => {{
+            const msgs = {{
+                1: 'Location blocked. To enable: click the lock/info icon in your browser address bar → Site settings → allow Location.',
+                2: 'Could not determine your location. Try searching an address manually.',
+                3: 'Location request timed out. Try again.'
+            }};
+            _showLocNote(msgs[err.code] || 'Location unavailable (code ' + err.code + ').', true);
+        }},
+        {{ timeout: 15000, enableHighAccuracy: false }}
+    );
 }}
 
 // ── SEVERITY BAR ──────────────────────────────────────────
