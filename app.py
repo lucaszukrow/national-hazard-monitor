@@ -3556,35 +3556,47 @@ function buildNRIPanel(nri, countyName) {{
 }}
 
 async function searchLocation() {{
-    const address = document.getElementById('address-input').value.trim();
-    if (!address) return;
-
     const btn = document.getElementById('search-btn');
     btn.textContent = '⏳ ANALYZING...';
     btn.disabled = true;
 
+    let lat, lng, placeName, nriState = '', nriCounty = '';
+
     try {{
-        // Geocode the address using Mapbox - reuse the same token already set
-        const geoUrl = 'https://api.mapbox.com/geocoding/v5/mapbox.places/' +
-            encodeURIComponent(address) +
-            '.json?country=US&limit=1&access_token=' + MAPBOX_TOKEN_JS;
-        const geo = await fetch(geoUrl);
-        if (!geo.ok) throw new Error('Geocoding failed: ' + geo.status);
-        const geoData = await geo.json();
-
-        if (!geoData.features || geoData.features.length === 0) {{
-            showResults([{{type:'error', text:'Address not found. Try a different search.'}}]);
-            return;
+        if (_gpsOverride) {{
+            // GPS path — skip geocoding, use exact device coordinates
+            lat = _gpsOverride.lat;
+            lng = _gpsOverride.lng;
+            const feat = _gpsOverride.feature;
+            _gpsOverride = null;
+            placeName = feat?.place_name || 'Your Location';
+            for (const ctx of (feat?.context || [])) {{
+                if (ctx.id.startsWith('region'))   nriState  = (ctx.short_code || '').replace('US-', '');
+                if (ctx.id.startsWith('district')) nriCounty = ctx.text || '';
+            }}
+        }} else {{
+            // Address search path — geocode the input
+            const address = document.getElementById('address-input').value.trim();
+            if (!address) {{ btn.textContent = '🔍 ANALYZE THREATS'; btn.disabled = false; return; }}
+            const geoUrl = 'https://api.mapbox.com/geocoding/v5/mapbox.places/' +
+                encodeURIComponent(address) +
+                '.json?country=US&limit=1&access_token=' + MAPBOX_TOKEN_JS;
+            const geo = await fetch(geoUrl);
+            if (!geo.ok) throw new Error('Geocoding failed: ' + geo.status);
+            const geoData = await geo.json();
+            if (!geoData.features || geoData.features.length === 0) {{
+                showResults([{{type:'error', text:'Address not found. Try a different search.'}}]);
+                btn.textContent = '🔍 ANALYZE THREATS'; btn.disabled = false;
+                return;
+            }}
+            [lng, lat] = geoData.features[0].center;
+            placeName  = geoData.features[0].place_name;
+            for (const ctx of (geoData.features[0].context || [])) {{
+                if (ctx.id.startsWith('region'))   nriState  = (ctx.short_code || '').replace('US-', '');
+                if (ctx.id.startsWith('district')) nriCounty = ctx.text || '';
+            }}
         }}
 
-        const [lng, lat] = geoData.features[0].center;
-        const placeName  = geoData.features[0].place_name;
-        const context    = geoData.features[0].context || [];
-        let nriState = '', nriCounty = '';
-        for (const ctx of context) {{
-            if (ctx.id.startsWith('region'))   nriState  = (ctx.short_code || '').replace('US-', '');
-            if (ctx.id.startsWith('district')) nriCounty = ctx.text || '';
-        }}
         const radiusMiles = parseFloat(document.getElementById('buffer-slider').value);
         const radiusKm    = radiusMiles * 1.60934;
 
@@ -3982,6 +3994,7 @@ function presetThermal() {{
 
 // ── LOCATE ME ─────────────────────────────────────────────
 let _userMarker = null;
+let _gpsOverride = null;  // set by locateMe() so searchLocation() can skip geocoding
 function _showLocNote(msg, isError) {{
     document.querySelectorAll('.loc-note').forEach(n => n.remove());
     const note = document.createElement('div');
@@ -4022,7 +4035,7 @@ function locateMe() {{
             return;
         }}
         navigator.geolocation.getCurrentPosition(
-            (pos) => {{
+            async (pos) => {{
                 const lat = pos.coords.latitude;
                 const lng = pos.coords.longitude;
                 map.flyTo({{ center: [lng, lat], zoom: 8, duration: 1800 }});
@@ -4033,18 +4046,35 @@ function locateMe() {{
                     box-shadow:0 0 0 4px rgba(88,191,255,0.3),0 0 16px rgba(88,191,255,0.6);`;
                 _userMarker = new mapboxgl.Marker({{ element: el }})
                     .setLngLat([lng, lat]).addTo(map);
-                const prompt = document.getElementById('location-prompt');
-                if (prompt) prompt.remove();
+                document.getElementById('location-prompt')?.remove();
                 document.querySelectorAll('.loc-note').forEach(n => n.remove());
+                _showLocNote('📍 Location found — analyzing nearby threats...', false);
+                // Reverse-geocode for a place name and county (needed for NRI lookup)
+                let feature = null;
+                try {{
+                    const rg = await fetch('https://api.mapbox.com/geocoding/v5/mapbox.places/'
+                        + lng + ',' + lat
+                        + '.json?types=place,district,region&limit=1&access_token=' + MAPBOX_TOKEN_JS);
+                    const rgd = await rg.json();
+                    feature = rgd.features?.[0] || null;
+                }} catch(e) {{}}
+                _gpsOverride = {{ lat, lng, feature }};
+                document.getElementById('address-input').value =
+                    feature ? feature.place_name.split(',').slice(0,2).join(',') : 'Your Location';
+                searchLocation();
             }},
             (err) => {{
-                const msgs = [
-                    '',
-                    'Location access was denied. See instructions above to enable it.',
-                    'Your location could not be determined. Try again or search manually.',
-                    'Location request timed out. Try again.'
-                ];
-                _showLocNote(msgs[err.code] || 'Location unavailable.', true);
+                let msg;
+                if (err.code === 1) {{
+                    const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
+                    msg = 'Location blocked. Check browser site permissions for this page'
+                        + (isMac ? ', or System Preferences → Privacy &amp; Security → Location Services.' : '.');
+                }} else if (err.code === 2) {{
+                    msg = 'Your location could not be determined. Try again or search an address manually.';
+                }} else {{
+                    msg = 'Location request timed out. Try again.';
+                }}
+                _showLocNote(msg, true);
             }},
             {{ timeout: 15000, enableHighAccuracy: false }}
         );
