@@ -4011,10 +4011,23 @@ function locateMe() {{
             const prompt = document.getElementById('location-prompt');
             if (prompt) prompt.remove();
         }},
-        () => {{
-            alert('Could not get your location. Please check browser permissions.');
+        (err) => {{
+            let msg;
+            if (err.code === 1) {{
+                msg = 'Location access was denied. Click the 🔒 icon in your browser address bar and allow location, then try again.';
+            }} else if (err.code === 2) {{
+                msg = 'Your location could not be determined. Try again or use the threat analysis panel to search manually.';
+            }} else {{
+                msg = 'Location request timed out. Try again.';
+            }}
+            // Show inline notice instead of blocking alert
+            const note = document.createElement('div');
+            note.style.cssText = 'position:fixed;bottom:80px;left:50%;transform:translateX(-50%);z-index:200;background:rgba(255,80,80,0.15);border:1px solid rgba(255,80,80,0.4);color:#ffc0c0;padding:10px 18px;font-size:11px;max-width:420px;text-align:center;font-family:Inter,sans-serif;backdrop-filter:blur(4px);';
+            note.textContent = msg;
+            document.body.appendChild(note);
+            setTimeout(() => note.remove(), 6000);
         }},
-        {{ timeout: 10000, enableHighAccuracy: false }}
+        {{ timeout: 15000, enableHighAccuracy: false }}
     );
 }}
 
