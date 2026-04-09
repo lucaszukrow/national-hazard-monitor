@@ -56,6 +56,9 @@ SENDGRID_API_KEY  = os.environ.get("SENDGRID_API_KEY", "")
 ALERT_EMAIL       = os.environ.get("ALERT_EMAIL", "")
 GROQ_API_KEY  = os.environ.get("GROQ_API_KEY", "")
 AIRNOW_KEY    = os.environ.get("AIRNOW_KEY", "").strip()   # Free key at airnowapi.org
+
+# In-memory subscription store (resets on redeploy; swap for a DB for persistence)
+_subscriptions = []  # list of {email, county, lat, lng, radius_miles}
 CENSUS_URL    = "https://www2.census.gov/programs-surveys/popest/datasets/2020-2023/counties/totals/co-est2023-alldata.csv"
 COUNTIES_URL  = "https://raw.githubusercontent.com/plotly/datasets/master/geojson-counties-fips.json"
 
@@ -760,6 +763,106 @@ def generate_sitrep():
         return text, text
     except Exception as e:
         return f"Error generating report: {e}", None
+
+
+def _haversine_km(lat1, lng1, lat2, lng2):
+    """Great-circle distance in km between two points."""
+    import math
+    R = 6371.0
+    dlat = math.radians(lat2 - lat1)
+    dlng = math.radians(lng2 - lng1)
+    a = math.sin(dlat / 2) ** 2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlng / 2) ** 2
+    return R * 2 * math.asin(min(1, math.sqrt(a)))
+
+
+def _feature_near(feat, lat, lng, radius_km):
+    """Return True if the feature's centroid is within radius_km of (lat, lng)."""
+    try:
+        geom = feat.get("geometry") or {}
+        t    = geom.get("type", "")
+        coords = geom.get("coordinates", [])
+        if t == "Point":
+            return _haversine_km(lat, lng, coords[1], coords[0]) <= radius_km
+        ring = coords[0] if t == "Polygon" else (coords[0][0] if t == "MultiPolygon" else [])
+        if ring:
+            avg_lat = sum(c[1] for c in ring) / len(ring)
+            avg_lng = sum(c[0] for c in ring) / len(ring)
+            return _haversine_km(lat, lng, avg_lat, avg_lng) <= radius_km
+    except Exception:
+        pass
+    return False
+
+
+def generate_county_sitrep(lat, lng, radius_miles=50, county_name=""):
+    """County-scoped AI briefing — filters all hazard layers to radius_miles around (lat, lng)."""
+    if not GROQ_API_KEY:
+        return "GROQ_API_KEY not configured.", None
+    if not _GROQ_AVAILABLE:
+        return "groq package not installed.", None
+
+    radius_km = radius_miles * 1.60934
+    loc = county_name or f"area near {lat:.2f}N, {abs(lng):.2f}W"
+
+    w_feats   = [f for f in state.get("warnings",      {}).get("features", []) if _feature_near(f, lat, lng, radius_km)]
+    eq_feats  = [f for f in state.get("earthquakes",   {}).get("features", []) if _feature_near(f, lat, lng, radius_km)]
+    fire_feats= [f for f in state.get("fires",         {}).get("features", []) if _feature_near(f, lat, lng, radius_km)]
+    gauge_feats=[f for f in state.get("river_gauges",  {}).get("features", []) if _feature_near(f, lat, lng, radius_km)]
+    perim_feats=[f for f in state.get("fire_perimeters",{}).get("features",[]) if _feature_near(f, lat, lng, radius_km)]
+
+    ctx = (
+        f"Location: {loc}\n"
+        f"Radius: {radius_miles} miles\n"
+        f"Report time: {state.get('last_update','Unknown')} UTC\n\n"
+        f"LOCAL HAZARDS:\n"
+        f"  NWS warnings/watches/advisories: {len(w_feats)}\n"
+        f"  Earthquakes M2.5+: {len(eq_feats)}\n"
+        f"  Wildfire detections: {len(fire_feats)}\n"
+        f"  Active fire perimeters: {len(perim_feats)}\n"
+        f"  Flood gauges at/above stage: {len(gauge_feats)}\n"
+    )
+    if w_feats:
+        ctx += "\nWarnings:\n" + "\n".join(
+            f"  - {phenom_names.get(str(f.get('properties',{}).get('phenom','')).upper(), f.get('properties',{}).get('phenom',''))} "
+            f"{'Warning' if f.get('properties',{}).get('sig')=='W' else 'Watch' if f.get('properties',{}).get('sig')=='A' else 'Advisory'}"
+            for f in w_feats[:8]
+        )
+    if eq_feats:
+        ctx += "\nEarthquakes:\n" + "\n".join(
+            f"  - M{f.get('properties',{}).get('mag','?')} — {f.get('properties',{}).get('place','')}"
+            for f in sorted(eq_feats, key=lambda x: x.get("properties",{}).get("mag",0), reverse=True)[:5]
+        )
+    if gauge_feats:
+        ctx += "\nFlood gauges:\n" + "\n".join(
+            f"  - {f.get('properties',{}).get('waterbody','')} ({f.get('properties',{}).get('status','')})"
+            for f in gauge_feats[:5]
+        )
+
+    prompt_user = (
+        f"Write a 60-second briefing for {loc} emergency management officials using EXACTLY this format:\n\n"
+        "SEVERITY: [1-10]\n\n"
+        "PRIORITY THREATS:\n"
+        "1. [Most urgent local threat — specific and actionable]\n"
+        "2. [Second threat — omit line if none]\n\n"
+        "SITUATION: [2 sentences on what is happening locally right now]\n\n"
+        "ACTIONS: [2 specific recommended actions for local emergency managers]\n\n"
+        f"Local hazard data:\n{ctx}"
+    )
+    try:
+        client = _GroqClient(api_key=GROQ_API_KEY)
+        resp   = client.chat.completions.create(
+            model="llama-3.3-70b-versatile", max_tokens=700,
+            messages=[
+                {"role": "system", "content": (
+                    "You are a county emergency management professional writing a local situation report. "
+                    "Be specific to the local area. Plain language only. No markdown."
+                )},
+                {"role": "user", "content": prompt_user}
+            ]
+        )
+        text = resp.choices[0].message.content
+        return text, text
+    except Exception as e:
+        return f"Error generating county briefing: {e}", None
 
 
 def send_alert_email(subject, body):
@@ -1720,9 +1823,46 @@ def serve_nri_counties():
 
 @app.server.route("/api/sitrep")
 def api_sitrep():
-    """Generate an AI situation report via Groq. Returns JSON {text, raw}."""
-    text, raw = generate_sitrep()
+    """Generate an AI situation report via Groq. Returns JSON {text, raw}.
+    Optional query params: lat, lng, radius (miles), county — for county-scoped briefing."""
+    try:
+        lat    = flask_module.request.args.get("lat",    type=float)
+        lng    = flask_module.request.args.get("lng",    type=float)
+        radius = flask_module.request.args.get("radius", default=50, type=float)
+        county = flask_module.request.args.get("county", default="")
+    except Exception:
+        lat = lng = None
+    if lat is not None and lng is not None:
+        text, raw = generate_county_sitrep(lat, lng, radius, county)
+    else:
+        text, raw = generate_sitrep()
     return flask_module.jsonify({"text": text, "raw": raw or ""})
+
+
+@app.server.route("/api/subscribe", methods=["POST"])
+def api_subscribe():
+    """Subscribe an email to county-level hazard alerts."""
+    data   = flask_module.request.get_json(force=True, silent=True) or {}
+    email  = (data.get("email") or "").strip().lower()
+    if not email or "@" not in email:
+        return flask_module.jsonify({"ok": False, "error": "Invalid email address"}), 400
+    county = data.get("county", "")
+    lat    = data.get("lat")
+    lng    = data.get("lng")
+    radius = float(data.get("radius", 50))
+    existing = next((s for s in _subscriptions if s["email"] == email), None)
+    if existing:
+        existing.update({"county": county, "lat": lat, "lng": lng, "radius": radius})
+        msg = f"Updated alert location to {county or 'your area'}."
+    else:
+        _subscriptions.append({
+            "email": email, "county": county,
+            "lat": lat, "lng": lng, "radius": radius,
+            "created": datetime.datetime.now().isoformat()
+        })
+        msg = f"Subscribed! You will receive alerts when hazards change for {county or 'your area'}."
+    print(f"  [SUBSCRIBE] {email} → {county or 'coords'} ({len(_subscriptions)} total)")
+    return flask_module.jsonify({"ok": True, "message": msg})
 
 @app.server.route("/mapbox")
 def mapbox_map():
@@ -1924,6 +2064,40 @@ def mapbox_map():
         .bm-btn:hover {{ background: rgba(88,191,255,0.15); color: #a8d8ff; }}
         .bm-btn.active {{ background: rgba(88,191,255,0.22); border-color: rgba(88,191,255,0.5); color: #58bfff; }}
 
+        /* ── COUNTY HERO PANEL ───────────────────────────── */
+        #county-hero {{
+            position: fixed; inset: 0; z-index: 150;
+            display: flex; align-items: center; justify-content: center;
+            background: rgba(4,15,27,0.93); backdrop-filter: blur(14px);
+            transition: opacity 0.35s ease;
+        }}
+        #county-hero .hero-box {{
+            text-align: center; max-width: 500px; padding: 0 28px; width: 100%;
+        }}
+        #hero-input {{
+            width: 100%; background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(88,191,255,0.35); border-radius: 6px;
+            color: #dde9fb; font-size: 14px; padding: 13px 16px;
+            outline: none; font-family: 'Inter', sans-serif;
+            transition: border-color 0.2s;
+        }}
+        #hero-input:focus {{ border-color: #58bfff; }}
+        #hero-input::placeholder {{ color: #3d5066; }}
+        .hero-search-btn {{
+            background: #58bfff; border: none; color: #000d18; font-weight: 700;
+            font-size: 11px; letter-spacing: 2px; padding: 13px 24px; cursor: pointer;
+            font-family: 'Space Grotesk', sans-serif; text-transform: uppercase;
+            border-radius: 6px; white-space: nowrap; transition: background 0.15s;
+        }}
+        .hero-search-btn:hover {{ background: #7dceff; }}
+        .hero-examples span {{
+            display: inline-block; margin: 3px 4px;
+            background: rgba(88,191,255,0.08); border: 1px solid rgba(88,191,255,0.2);
+            color: #58bfff; font-size: 10px; padding: 3px 9px; border-radius: 20px;
+            cursor: pointer; transition: background 0.15s;
+        }}
+        .hero-examples span:hover {{ background: rgba(88,191,255,0.18); }}
+
         /* ── SEVERITY BAR ───────────────────────────────── */
         #severity-bar {{
             position: fixed; top: 0; left: 0; right: 0; z-index: 200;
@@ -1993,6 +2167,27 @@ def mapbox_map():
     </style>
 </head>
 <body class="bg-background text-on-surface overflow-hidden select-none">
+
+<!-- County Hero Search Panel — front-and-center on load -->
+<div id="county-hero">
+  <div class="hero-box">
+    <div style="font-size:9px;letter-spacing:4px;color:#58bfff;font-weight:700;text-transform:uppercase;margin-bottom:18px;">National All-Hazards Monitor</div>
+    <h1 style="font-family:'Space Grotesk',sans-serif;font-size:26px;font-weight:700;color:#dde9fb;line-height:1.3;margin-bottom:10px;">What is threatening your county?</h1>
+    <p style="font-size:12px;color:#4a6280;margin-bottom:28px;line-height:1.7;">Real-time hazards, threat score, and a 60-second briefing you can share with your team.</p>
+    <div style="display:flex;gap:8px;margin-bottom:14px;">
+      <input id="hero-input" type="text" placeholder="Harris County TX  ·  Miami-Dade  ·  Los Angeles CA" autocomplete="off" />
+      <button class="hero-search-btn" onclick="heroSearch()">ANALYZE</button>
+    </div>
+    <div class="hero-examples" style="margin-bottom:20px;">
+      <span onclick="heroQuick('Harris County TX')">Harris County TX</span>
+      <span onclick="heroQuick('Miami-Dade FL')">Miami-Dade FL</span>
+      <span onclick="heroQuick('Los Angeles CA')">Los Angeles CA</span>
+      <span onclick="heroQuick('Cook County IL')">Cook County IL</span>
+      <span onclick="heroQuick('King County WA')">King County WA</span>
+    </div>
+    <div onclick="dismissHero()" style="font-size:10px;color:#2d3f50;cursor:pointer;letter-spacing:1px;text-transform:uppercase;">Skip — show full map</div>
+  </div>
+</div>
 
 <!-- Severity bar — top 3px strip, color reflects current national threat level -->
 <div id="severity-bar"><div id="severity-fill"></div></div>
@@ -3910,6 +4105,10 @@ async function searchLocation() {{
         // Sort threats by distance
         threats.sort((a,b) => (a.dist||99) - (b.dist||99));
 
+        // Store search context for county briefing + email alerts
+        _searchContext = {{ lat, lng, label: placeName.split(',').slice(0,2).join(','), radius: radiusMiles }};
+        dismissHero();  // remove hero panel if still visible
+
         // Show results
         document.getElementById('clear-search').style.display = 'block';
         const locationLabel = placeName.split(',').slice(0,2).join(',');
@@ -4027,6 +4226,29 @@ function showResults(threats) {{
                 ${{Math.round(t.dist)}} miles away</div>` : ''}}
         </div>`;
     }}).join('');
+
+    // ── ACTION FOOTER: briefing + email alert signup ──
+    div.innerHTML += `
+    <div style="margin-top:12px;border-top:1px solid rgba(88,191,255,0.15);padding-top:12px;">
+        <button id="county-sitrep-btn" onclick="openCountySitrep()"
+            style="width:100%;background:rgba(88,191,255,0.1);border:1px solid rgba(88,191,255,0.3);
+            color:#58bfff;font-size:10px;font-weight:700;letter-spacing:2px;padding:10px;cursor:pointer;
+            font-family:'Space Grotesk',sans-serif;text-transform:uppercase;border-radius:6px;margin-bottom:10px;
+            transition:background 0.15s;">📋 GENERATE 60-SEC BRIEFING</button>
+        <div style="font-size:9px;color:#4a6280;letter-spacing:1px;text-transform:uppercase;margin-bottom:6px;">Alert me when threats change</div>
+        <div style="display:flex;gap:6px;">
+            <input id="alert-email" type="email" placeholder="your@email.gov"
+                style="flex:1;background:rgba(0,0,0,0.3);border:1px solid rgba(88,191,255,0.2);
+                color:#dde9fb;font-size:10px;padding:8px 10px;outline:none;
+                font-family:'Inter',sans-serif;border-radius:4px;" />
+            <button onclick="subscribeAlerts()"
+                style="background:rgba(88,191,255,0.1);border:1px solid rgba(88,191,255,0.3);
+                color:#58bfff;font-size:9px;font-weight:700;letter-spacing:1px;padding:8px 12px;
+                cursor:pointer;font-family:'Inter',sans-serif;white-space:nowrap;border-radius:4px;">
+                🔔 ALERT ME</button>
+        </div>
+        <div id="subscribe-status" style="font-size:9px;color:#4a6280;margin-top:5px;text-align:center;min-height:14px;"></div>
+    </div>`;
 }}
 
 // ── SIDEBAR PRESETS ───────────────────────────────────────
@@ -4065,6 +4287,99 @@ function presetSeismic() {{
 // THERMAL: fire detections + fire perimeters
 function presetThermal() {{
     _setPresetLayers(['fire-points','fire-perimeter-fill','fire-perimeter-outline']);
+}}
+
+// ── SEARCH CONTEXT (set after each successful search) ─────
+let _searchContext = null;  // {{lat, lng, label, radius}}
+
+// ── HERO PANEL ────────────────────────────────────────────
+function heroSearch() {{
+    const val = (document.getElementById('hero-input')?.value || '').trim();
+    if (!val) return;
+    document.getElementById('address-input').value = val;
+    dismissHero();
+    searchLocation();
+}}
+function heroQuick(val) {{
+    document.getElementById('hero-input').value = val;
+    heroSearch();
+}}
+function dismissHero() {{
+    const h = document.getElementById('county-hero');
+    if (!h) return;
+    h.style.opacity = '0';
+    h.style.pointerEvents = 'none';
+    setTimeout(() => h.remove(), 380);
+}}
+// Enter key on hero input
+document.addEventListener('DOMContentLoaded', () => {{
+    const hi = document.getElementById('hero-input');
+    if (hi) hi.addEventListener('keypress', e => {{ if (e.key === 'Enter') heroSearch(); }});
+}});
+
+// ── COUNTY BRIEFING + EMAIL ALERTS ───────────────────────
+function openCountySitrep() {{
+    const btn = document.getElementById('county-sitrep-btn');
+    if (btn) {{ btn.textContent = '⏳ GENERATING...'; btn.disabled = true; }}
+    const params = _searchContext
+        ? '?lat=' + _searchContext.lat + '&lng=' + _searchContext.lng
+          + '&radius=' + _searchContext.radius
+          + '&county=' + encodeURIComponent(_searchContext.label)
+        : '';
+    // Reuse the existing sitrep modal
+    document.getElementById('sitrep-overlay').classList.add('open');
+    const setEl = (id, html) => {{ const el = document.getElementById(id); if (el) el.innerHTML = html; }};
+    setEl('sitrep-level', '—');
+    document.getElementById('sitrep-level').style.color = '#FF8C00';
+    setEl('sitrep-status-badge', 'GENERATING LOCAL BRIEFING...');
+    setEl('sitrep-summary', 'Analyzing local hazards...');
+    setEl('sitrep-threats', '<p style="color:#a0acbd;font-size:13px;">Filtering threats to your area...</p>');
+    setEl('sitrep-actions', '<p style="color:#a0acbd;font-size:11px;">Processing...</p>');
+    setEl('sitrep-confidence', '<p>> COUNTY_SCOPE_ACTIVE</p>');
+    _sitrepRaw = '';
+    fetch('/api/sitrep' + params)
+        .then(r => r.json())
+        .then(data => {{
+            _sitrepRaw = data.raw || data.text || '';
+            parseSitrep(_sitrepRaw);
+            if (btn) {{ btn.textContent = '📋 GENERATE BRIEFING'; btn.disabled = false; }}
+        }})
+        .catch(() => {{
+            setEl('sitrep-summary', 'Failed to generate briefing.');
+            if (btn) {{ btn.textContent = '📋 GENERATE BRIEFING'; btn.disabled = false; }}
+        }});
+}}
+async function subscribeAlerts() {{
+    const email  = (document.getElementById('alert-email')?.value || '').trim();
+    const status = document.getElementById('subscribe-status');
+    if (!email || !email.includes('@')) {{
+        if (status) {{ status.textContent = 'Please enter a valid email.'; status.style.color = '#ff716c'; }}
+        return;
+    }}
+    if (!_searchContext) {{
+        if (status) {{ status.textContent = 'Search a county first.'; status.style.color = '#ff716c'; }}
+        return;
+    }}
+    try {{
+        const r = await fetch('/api/subscribe', {{
+            method: 'POST',
+            headers: {{'Content-Type': 'application/json'}},
+            body: JSON.stringify({{
+                email,
+                county: _searchContext.label,
+                lat: _searchContext.lat,
+                lng: _searchContext.lng,
+                radius: _searchContext.radius
+            }})
+        }});
+        const d = await r.json();
+        if (status) {{
+            status.textContent = d.message || (d.ok ? 'Subscribed!' : (d.error || 'Error.'));
+            status.style.color = d.ok ? '#00e676' : '#ff716c';
+        }}
+    }} catch(e) {{
+        if (status) {{ status.textContent = 'Failed. Try again.'; status.style.color = '#ff716c'; }}
+    }}
 }}
 
 // ── LOCATE ME ─────────────────────────────────────────────
