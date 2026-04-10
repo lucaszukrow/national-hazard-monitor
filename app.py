@@ -3709,9 +3709,15 @@ const MAPBOX_TOKEN_JS = mapboxgl.accessToken;
 let searchMarker = null;
 let bufferLayer  = null;
 
-// Update buffer label
+// Update buffer label and re-run analysis when slider changes
+let _sliderDebounce = null;
 document.getElementById('buffer-slider').addEventListener('input', function() {{
     document.getElementById('buffer-label').textContent = this.value + ' miles';
+    // Re-run analysis only if a search is already active
+    if (_searchContext !== null) {{
+        clearTimeout(_sliderDebounce);
+        _sliderDebounce = setTimeout(() => searchLocation(), 400);
+    }}
 }});
 
 // Enter key triggers search
@@ -3925,8 +3931,8 @@ async function searchLocation() {{
         // Fetch FEMA NRI data in parallel (local lookup, no extra API call)
         const nriPromise = fetchNRI(nriState, nriCounty);
 
-        // Remove old marker and buffer
-        clearSearch(false);
+        // Remove old marker and buffer (don't restore data — we're about to set it)
+        clearSearch(false, false);
 
         // Add marker at location
         const el = document.createElement('div');
@@ -3969,13 +3975,17 @@ async function searchLocation() {{
 
         const severe = ['TORNADO','HAIL','TSTM WND GST','TSTM WND DMG','FUNNEL CLOUD','LIGHTNING','FLASH FLOOD'];
 
-        const [warnings, earthquakes, fires, lightning, perimeters] = await Promise.all([
+        const [warnings, earthquakes, fires, lightning, perimeters, spcData, droughtData, stormsData, countiesData] = await Promise.all([
             safeJson('/api/warnings'),
             safeJson('/api/earthquakes'),
             safeJson('/api/fires'),
             safeJson('https://mesonet.agron.iastate.edu/geojson/lsr.php?hours=6&wfo=all',
                 d => ({{type:'FeatureCollection', features:(d.features||[]).filter(f => severe.some(x => (f.properties&&f.properties.typetext||'').toUpperCase().indexOf(x)>=0))}})),
             safeJson('https://services3.arcgis.com/T4QMspbfLg3qTGWY/arcgis/rest/services/WFIGS_Interagency_Perimeters_YTD/FeatureServer/0/query?where=1%3D1&outFields=IncidentName,GISAcres,PercentContained&geometryPrecision=3&outSR=4326&resultRecordCount=200&f=geojson'),
+            safeJson('/api/spc'),
+            safeJson('/api/drought'),
+            safeJson('/api/storms'),
+            safeJson('/api/counties'),
         ]);
 
         const threats = [];
@@ -4158,9 +4168,10 @@ async function searchLocation() {{
         _searchContext = {{ lat, lng, label: placeName.split(',').slice(0,2).join(','), radius: radiusMiles }};
         dismissHero();  // remove hero panel if still visible
 
-        // ── ACTIVATE ONLY LAYERS WITH DATA IN THIS BUFFER ──────────────────
-        // Turn off all toggleable layers first, then turn on only those with
-        // matching features inside the buffer. GOES Infrared always excluded.
+        // ── ACTIVATE ALL LAYERS (except GOES Infrared) ──────────────────────
+        // Turn on every toggleable layer so the user sees everything at once.
+        // GOES Infrared is intentionally excluded — it covers the full CONUS
+        // and is too visually heavy to auto-enable.
         const _ALL_TOGGLEABLE = [
             'warnings-fill','warnings-outline',
             'spc-fill','spc-outline',
@@ -4173,18 +4184,46 @@ async function searchLocation() {{
             'shelter-circles','infra-normal','infra-at-risk',
             'counties-fill','counties-outline'
         ];
-        const _bufferActive = new Set();
-        if (warningsInBuffer.length > 0)   {{ _bufferActive.add('warnings-fill'); _bufferActive.add('warnings-outline'); }}
-        if (eqFeats.length > 0)            _bufferActive.add('eq-circles');
-        if (fireFeats.length > 0)          _bufferActive.add('fire-points');
-        if (stormFeats.length > 0)         _bufferActive.add('lightning-strikes');
-        if (perimInBuffer.length > 0)      {{ _bufferActive.add('fire-perimeter-fill'); _bufferActive.add('fire-perimeter-outline'); }}
-        // Always show warnings layer even if empty (it's the primary layer)
-        _bufferActive.add('warnings-fill'); _bufferActive.add('warnings-outline');
-
         _ALL_TOGGLEABLE.forEach(id => {{
             if (map.getLayer(id)) {{
-                map.setLayoutProperty(id, 'visibility', _bufferActive.has(id) ? 'visible' : 'none');
+                map.setLayoutProperty(id, 'visibility', 'visible');
+            }}
+        }});
+
+        // ── CLIP ALL SOURCES TO THE BUFFER ZONE ─────────────────────────────
+        // Polygon/line sources: replace source data with only features that
+        // intersect the buffer circle so the map shows only nearby hazards.
+        const filterByBuffer = (fc) => ({{
+            type: 'FeatureCollection',
+            features: (fc.features || []).filter(f => {{
+                try {{
+                    if (!f.geometry) return false;
+                    if (f.geometry.type === 'Point')
+                        return turf.booleanPointInPolygon(turf.point(f.geometry.coordinates), buffer);
+                    return turf.booleanIntersects(f, buffer);
+                }} catch(e) {{ return false; }}
+            }})
+        }});
+
+        if (map.getSource('warnings'))        map.getSource('warnings').setData({{type:'FeatureCollection', features: warningsInBuffer}});
+        if (map.getSource('fire_perimeters')) map.getSource('fire_perimeters').setData({{type:'FeatureCollection', features: perimInBuffer}});
+        if (map.getSource('spc'))             map.getSource('spc').setData(filterByBuffer(spcData));
+        if (map.getSource('drought'))         map.getSource('drought').setData(filterByBuffer(droughtData));
+        if (map.getSource('storms'))          map.getSource('storms').setData(filterByBuffer(stormsData));
+        if (map.getSource('counties'))        map.getSource('counties').setData(filterByBuffer(countiesData));
+
+        // Point layers: apply a Mapbox within-buffer filter so only points
+        // inside the circle are rendered. Save original filters for restore.
+        const _BUFFER_PT_LAYERS = [
+            'eq-circles','fire-points','lightning-strikes','river-gauges',
+            'volcano-circles','fema-disasters','aqi-circles',
+            'shelter-circles','infra-normal','infra-at-risk','storm-track'
+        ];
+        _bufferPointFilters = {{}};
+        _BUFFER_PT_LAYERS.forEach(id => {{
+            if (map.getLayer(id)) {{
+                _bufferPointFilters[id] = map.getFilter(id) || null;
+                map.setFilter(id, ['within', buffer]);
             }}
         }});
 
@@ -4371,7 +4410,8 @@ function presetThermal() {{
 }}
 
 // ── SEARCH CONTEXT (set after each successful search) ─────
-let _searchContext = null;  // {{lat, lng, label, radius}}
+let _searchContext      = null;  // {{lat, lng, label, radius}}
+let _bufferPointFilters = {{}};   // original point-layer filters, restored on clear
 
 // ── HERO PANEL ────────────────────────────────────────────
 function heroSearch() {{
@@ -4635,7 +4675,7 @@ document.addEventListener('keydown', function(e) {{
     else if (key === 'Escape')           {{ closeSitrep(); closeShortcuts(); }}
 }});
 
-function clearSearch(resetInput=true) {{
+function clearSearch(resetInput=true, restoreData=true) {{
     if (searchMarker) {{ searchMarker.remove(); searchMarker = null; }}
     if (map.getLayer('buffer-fill'))    map.removeLayer('buffer-fill');
     if (map.getLayer('buffer-outline')) map.removeLayer('buffer-outline');
@@ -4644,6 +4684,16 @@ function clearSearch(resetInput=true) {{
     document.getElementById('threat-results').innerHTML = '';
     document.getElementById('clear-search').style.display = 'none';
     if (resetInput) document.getElementById('address-input').value = '';
+    if (restoreData) {{
+        // Restore point-layer filters that were overridden during search
+        Object.entries(_bufferPointFilters).forEach(([id, filter]) => {{
+            if (map.getLayer(id)) map.setFilter(id, filter);
+        }});
+        _bufferPointFilters = {{}};
+        _searchContext = null;
+        // Re-fetch all sources so polygon layers show global data again
+        loadData();
+    }}
 }}
 
 </script>
