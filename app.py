@@ -3467,8 +3467,10 @@ function setupLayers() {{
             updateHazardChart(s);
 
             // Stagger source refreshes 15ms apart — prevents simultaneous GPU spikes
-            // while keeping total stall to ~225ms instead of 600ms
-            if (map.loaded()) {{
+            // while keeping total stall to ~225ms instead of 600ms.
+            // Skip while a buffer search is active — the sources hold filtered data
+            // and refreshing would overwrite the buffer clip.
+            if (map.loaded() && _searchContext === null) {{
                 const t = Date.now();
                 const srcs = ['warnings','spc','earthquakes','fires','counties',
                     'lightning','fire_perimeters','storms','fema_disasters',
@@ -3975,7 +3977,9 @@ async function searchLocation() {{
 
         const severe = ['TORNADO','HAIL','TSTM WND GST','TSTM WND DMG','FUNNEL CLOUD','LIGHTNING','FLASH FLOOD'];
 
-        const [warnings, earthquakes, fires, lightning, perimeters, spcData, droughtData, stormsData, countiesData] = await Promise.all([
+        const [warnings, earthquakes, fires, lightning, perimeters,
+               spcData, droughtData, stormsData, countiesData,
+               riverData, volcanoData, femaData, aqiData, shelterData] = await Promise.all([
             safeJson('/api/warnings'),
             safeJson('/api/earthquakes'),
             safeJson('/api/fires'),
@@ -3986,6 +3990,11 @@ async function searchLocation() {{
             safeJson('/api/drought'),
             safeJson('/api/storms'),
             safeJson('/api/counties'),
+            safeJson('/api/river_gauges'),
+            safeJson('/api/volcanoes'),
+            safeJson('/api/fema_disasters'),
+            safeJson('/api/air_quality'),
+            safeJson('/api/shelters'),
         ]);
 
         const threats = [];
@@ -4191,9 +4200,10 @@ async function searchLocation() {{
         }});
 
         // ── CLIP ALL SOURCES TO THE BUFFER ZONE ─────────────────────────────
-        // Polygon/line sources: replace source data with only features that
-        // intersect the buffer circle so the map shows only nearby hazards.
-        const filterByBuffer = (fc) => ({{
+        // Replace every source with only the features that fall inside the
+        // buffer circle. loadData() is blocked from overwriting these while
+        // _searchContext is non-null (set just below).
+        const polyFilter = (fc) => ({{
             type: 'FeatureCollection',
             features: (fc.features || []).filter(f => {{
                 try {{
@@ -4204,28 +4214,32 @@ async function searchLocation() {{
                 }} catch(e) {{ return false; }}
             }})
         }});
+        const ptFilter = (fc) => ({{
+            type: 'FeatureCollection',
+            features: (fc.features || []).filter(f => {{
+                try {{
+                    if (!f.geometry?.coordinates) return false;
+                    return turf.booleanPointInPolygon(turf.point(f.geometry.coordinates), buffer);
+                }} catch(e) {{ return false; }}
+            }})
+        }});
 
+        // Polygon / multi-geometry sources
         if (map.getSource('warnings'))        map.getSource('warnings').setData({{type:'FeatureCollection', features: warningsInBuffer}});
         if (map.getSource('fire_perimeters')) map.getSource('fire_perimeters').setData({{type:'FeatureCollection', features: perimInBuffer}});
-        if (map.getSource('spc'))             map.getSource('spc').setData(filterByBuffer(spcData));
-        if (map.getSource('drought'))         map.getSource('drought').setData(filterByBuffer(droughtData));
-        if (map.getSource('storms'))          map.getSource('storms').setData(filterByBuffer(stormsData));
-        if (map.getSource('counties'))        map.getSource('counties').setData(filterByBuffer(countiesData));
-
-        // Point layers: apply a Mapbox within-buffer filter so only points
-        // inside the circle are rendered. Save original filters for restore.
-        const _BUFFER_PT_LAYERS = [
-            'eq-circles','fire-points','lightning-strikes','river-gauges',
-            'volcano-circles','fema-disasters','aqi-circles',
-            'shelter-circles','infra-normal','infra-at-risk','storm-track'
-        ];
-        _bufferPointFilters = {{}};
-        _BUFFER_PT_LAYERS.forEach(id => {{
-            if (map.getLayer(id)) {{
-                _bufferPointFilters[id] = map.getFilter(id) || null;
-                map.setFilter(id, ['within', buffer]);
-            }}
-        }});
+        if (map.getSource('spc'))             map.getSource('spc').setData(polyFilter(spcData));
+        if (map.getSource('drought'))         map.getSource('drought').setData(polyFilter(droughtData));
+        if (map.getSource('storms'))          map.getSource('storms').setData(polyFilter(stormsData));
+        if (map.getSource('counties'))        map.getSource('counties').setData(polyFilter(countiesData));
+        // Point sources
+        if (map.getSource('earthquakes'))     map.getSource('earthquakes').setData(ptFilter(earthquakes));
+        if (map.getSource('fires'))           map.getSource('fires').setData(ptFilter(fires));
+        if (map.getSource('lightning'))       map.getSource('lightning').setData(ptFilter(lightning));
+        if (map.getSource('river_gauges'))    map.getSource('river_gauges').setData(ptFilter(riverData));
+        if (map.getSource('volcanoes'))       map.getSource('volcanoes').setData(ptFilter(volcanoData));
+        if (map.getSource('fema_disasters'))  map.getSource('fema_disasters').setData(ptFilter(femaData));
+        if (map.getSource('air_quality'))     map.getSource('air_quality').setData(ptFilter(aqiData));
+        if (map.getSource('shelters'))        map.getSource('shelters').setData(ptFilter(shelterData));
 
         // Show results
         document.getElementById('clear-search').style.display = 'block';
@@ -4410,8 +4424,7 @@ function presetThermal() {{
 }}
 
 // ── SEARCH CONTEXT (set after each successful search) ─────
-let _searchContext      = null;  // {{lat, lng, label, radius}}
-let _bufferPointFilters = {{}};   // original point-layer filters, restored on clear
+let _searchContext = null;  // {{lat, lng, label, radius}}
 
 // ── HERO PANEL ────────────────────────────────────────────
 function heroSearch() {{
@@ -4685,13 +4698,9 @@ function clearSearch(resetInput=true, restoreData=true) {{
     document.getElementById('clear-search').style.display = 'none';
     if (resetInput) document.getElementById('address-input').value = '';
     if (restoreData) {{
-        // Restore point-layer filters that were overridden during search
-        Object.entries(_bufferPointFilters).forEach(([id, filter]) => {{
-            if (map.getLayer(id)) map.setFilter(id, filter);
-        }});
-        _bufferPointFilters = {{}};
+        // Allow loadData() to refresh sources again, then trigger a refresh
+        // so all sources return to showing global data.
         _searchContext = null;
-        // Re-fetch all sources so polygon layers show global data again
         loadData();
     }}
 }}
