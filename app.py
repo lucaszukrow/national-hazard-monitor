@@ -4181,6 +4181,8 @@ async function searchLocation() {{
         // Turn on every toggleable layer so the user sees everything at once.
         // GOES Infrared is intentionally excluded — it covers the full CONUS
         // and is too visually heavy to auto-enable.
+        // nexrad-layer is a raster tile source — it covers the full CONUS and
+        // cannot be clipped to the buffer circle. Exclude it like GOES Infrared.
         const _ALL_TOGGLEABLE = [
             'warnings-fill','warnings-outline',
             'spc-fill','spc-outline',
@@ -4188,7 +4190,7 @@ async function searchLocation() {{
             'fire-points','fire-perimeter-fill','fire-perimeter-outline',
             'lightning-strikes',
             'storm-cone','storm-cone-outline','storm-track',
-            'nexrad-layer','river-gauges','volcano-circles',
+            'river-gauges','volcano-circles',
             'drought-fill','fema-disasters','aqi-circles',
             'shelter-circles','infra-normal','infra-at-risk',
             'counties-fill','counties-outline'
@@ -4200,20 +4202,33 @@ async function searchLocation() {{
         }});
 
         // ── CLIP ALL SOURCES TO THE BUFFER ZONE ─────────────────────────────
-        // Replace every source with only the features that fall inside the
-        // buffer circle. loadData() is blocked from overwriting these while
-        // _searchContext is non-null (set just below).
-        const polyFilter = (fc) => ({{
-            type: 'FeatureCollection',
-            features: (fc.features || []).filter(f => {{
+        // Polygon features are clipped to the buffer circle via turf.intersect
+        // so only the portion inside the circle renders — not the full polygon.
+        // Point features are filtered via booleanPointInPolygon.
+        // loadData() is blocked from overwriting these while _searchContext is set.
+
+        // Polygon/mixed sources: clip polygons to buffer boundary, filter points in
+        const polyFilter = (fc) => {{
+            const feats = [];
+            for (const f of (fc.features || [])) {{
                 try {{
-                    if (!f.geometry) return false;
-                    if (f.geometry.type === 'Point')
-                        return turf.booleanPointInPolygon(turf.point(f.geometry.coordinates), buffer);
-                    return turf.booleanIntersects(f, buffer);
-                }} catch(e) {{ return false; }}
-            }})
-        }});
+                    if (!f.geometry) continue;
+                    const gt = f.geometry.type;
+                    if (gt === 'Point') {{
+                        if (turf.booleanPointInPolygon(turf.point(f.geometry.coordinates), buffer))
+                            feats.push(f);
+                    }} else if (gt === 'Polygon' || gt === 'MultiPolygon') {{
+                        const clipped = turf.intersect(f, buffer);
+                        if (clipped) {{ clipped.properties = f.properties; feats.push(clipped); }}
+                    }} else if (turf.booleanIntersects(f, buffer)) {{
+                        feats.push(f);  // LineString etc — include if intersects
+                    }}
+                }} catch(e) {{}}
+            }}
+            return {{type:'FeatureCollection', features: feats}};
+        }};
+
+        // Point-only sources: filter to points inside buffer
         const ptFilter = (fc) => ({{
             type: 'FeatureCollection',
             features: (fc.features || []).filter(f => {{
@@ -4224,14 +4239,14 @@ async function searchLocation() {{
             }})
         }});
 
-        // Polygon / multi-geometry sources
-        if (map.getSource('warnings'))        map.getSource('warnings').setData({{type:'FeatureCollection', features: warningsInBuffer}});
-        if (map.getSource('fire_perimeters')) map.getSource('fire_perimeters').setData({{type:'FeatureCollection', features: perimInBuffer}});
+        // Polygon sources — clip to buffer boundary via turf.intersect
+        if (map.getSource('warnings'))        map.getSource('warnings').setData(polyFilter(warnings));
+        if (map.getSource('fire_perimeters')) map.getSource('fire_perimeters').setData(polyFilter(perimeters));
         if (map.getSource('spc'))             map.getSource('spc').setData(polyFilter(spcData));
         if (map.getSource('drought'))         map.getSource('drought').setData(polyFilter(droughtData));
         if (map.getSource('storms'))          map.getSource('storms').setData(polyFilter(stormsData));
         if (map.getSource('counties'))        map.getSource('counties').setData(polyFilter(countiesData));
-        // Point sources
+        // Point sources — keep only points inside the buffer circle
         if (map.getSource('earthquakes'))     map.getSource('earthquakes').setData(ptFilter(earthquakes));
         if (map.getSource('fires'))           map.getSource('fires').setData(ptFilter(fires));
         if (map.getSource('lightning'))       map.getSource('lightning').setData(ptFilter(lightning));
