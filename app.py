@@ -865,6 +865,45 @@ def generate_county_sitrep(lat, lng, radius_miles=50, county_name=""):
         return f"Error generating county briefing: {e}", None
 
 
+def generate_briefing_from_client(score, threat_level, threats, county):
+    """Generate a SITUATION + ACTIONS briefing using the client-computed threat score and list.
+    The AI does not re-derive severity — it uses the score we already calculated."""
+    if not GROQ_API_KEY:
+        return "GROQ_API_KEY not configured.", None
+    if not _GROQ_AVAILABLE:
+        return "groq package not installed.", None
+
+    loc = county or "this area"
+    threat_list = "\n".join(f"  - {t}" for t in threats[:10]) if threats else "  - No active threats detected"
+
+    prompt = (
+        f"Location: {loc}\n"
+        f"Computed threat score: {score}/100 ({threat_level} THREAT)\n"
+        f"Active threats in this area:\n{threat_list}\n\n"
+        f"Write a 60-second briefing for {loc} emergency management officials.\n"
+        "Use EXACTLY this format — do not add a SEVERITY line, the score is already shown:\n\n"
+        "SITUATION: [2 sentences on what is happening locally right now and who is affected]\n\n"
+        "ACTIONS: [2-3 specific, concrete actions local emergency managers should take now]\n\n"
+        "Be specific to the listed threats. Plain language only. No markdown. No bullet points in ACTIONS — use numbered sentences."
+    )
+    try:
+        client = _GroqClient(api_key=GROQ_API_KEY)
+        resp   = client.chat.completions.create(
+            model="llama-3.3-70b-versatile", max_tokens=400,
+            messages=[
+                {"role": "system", "content": (
+                    "You are a county emergency manager writing a concise local situation briefing. "
+                    "Be direct and actionable. Reference the specific threats listed. No markdown."
+                )},
+                {"role": "user", "content": prompt}
+            ]
+        )
+        text = resp.choices[0].message.content.strip()
+        return text, text
+    except Exception as e:
+        return f"Error generating briefing: {e}", None
+
+
 def send_alert_email(subject, body):
     """Send a plain-text alert email via SendGrid. Silently skips if unconfigured."""
     if not _SENDGRID_AVAILABLE or not SENDGRID_API_KEY or not ALERT_EMAIL:
@@ -1821,21 +1860,31 @@ def serve_nri_counties():
         mimetype='application/json'
     )
 
-@app.server.route("/api/sitrep")
+@app.server.route("/api/sitrep", methods=["GET", "POST"])
 def api_sitrep():
     """Generate an AI situation report via Groq. Returns JSON {text, raw}.
-    Optional query params: lat, lng, radius (miles), county — for county-scoped briefing."""
-    try:
-        lat    = flask_module.request.args.get("lat",    type=float)
-        lng    = flask_module.request.args.get("lng",    type=float)
-        radius = flask_module.request.args.get("radius", default=50, type=float)
-        county = flask_module.request.args.get("county", default="")
-    except Exception:
-        lat = lng = None
-    if lat is not None and lng is not None:
-        text, raw = generate_county_sitrep(lat, lng, radius, county)
+    POST body: {score, threat_level, threats[], county, lat, lng, radius}
+      — uses client-computed score/threats so AI doesn't re-derive severity.
+    GET fallback: national sitrep (no location params) or county sitrep (lat/lng params)."""
+    if flask_module.request.method == "POST":
+        data   = flask_module.request.get_json(force=True, silent=True) or {}
+        score  = data.get("score", 0)
+        level  = data.get("threat_level", "LOW")
+        threats= data.get("threats", [])
+        county = data.get("county", "")
+        text, raw = generate_briefing_from_client(score, level, threats, county)
     else:
-        text, raw = generate_sitrep()
+        try:
+            lat    = flask_module.request.args.get("lat",    type=float)
+            lng    = flask_module.request.args.get("lng",    type=float)
+            radius = flask_module.request.args.get("radius", default=50, type=float)
+            county = flask_module.request.args.get("county", default="")
+        except Exception:
+            lat = lng = None
+        if lat is not None and lng is not None:
+            text, raw = generate_county_sitrep(lat, lng, radius, county)
+        else:
+            text, raw = generate_sitrep()
     return flask_module.jsonify({"text": text, "raw": raw or ""})
 
 
@@ -4117,6 +4166,9 @@ async function searchLocation() {{
         const nriData = await nriPromise;
         const nriHtml = buildNRIPanel(nriData, locationLabel.split(',')[0]);
 
+        const threatLevel = getThreatLevel(totalScore).label;
+        const threatTexts = threats.map(t => t.text);
+
         if (threats.length === 0) {{
             showResults([
                 {{ type: 'score', score: 0 }},
@@ -4131,6 +4183,9 @@ async function searchLocation() {{
                 {{ type: 'nri', html: nriHtml }}
             ]);
         }}
+
+        // Auto-generate county briefing using the computed score + threat list
+        generateInlineBriefing(totalScore, threatLevel, threatTexts, locationLabel);
 
     }} catch(err) {{
         console.error('Search error:', err);
@@ -4227,14 +4282,10 @@ function showResults(threats) {{
         </div>`;
     }}).join('');
 
-    // ── ACTION FOOTER: briefing + email alert signup ──
+    // ── ACTION FOOTER: inline briefing placeholder + email alert signup ──
     div.innerHTML += `
-    <div style="margin-top:12px;border-top:1px solid rgba(88,191,255,0.15);padding-top:12px;">
-        <button id="county-sitrep-btn" onclick="openCountySitrep()"
-            style="width:100%;background:rgba(88,191,255,0.1);border:1px solid rgba(88,191,255,0.3);
-            color:#58bfff;font-size:10px;font-weight:700;letter-spacing:2px;padding:10px;cursor:pointer;
-            font-family:'Space Grotesk',sans-serif;text-transform:uppercase;border-radius:6px;margin-bottom:10px;
-            transition:background 0.15s;">📋 GENERATE 60-SEC BRIEFING</button>
+    <div id="inline-briefing"></div>
+    <div style="margin-top:10px;border-top:1px solid rgba(88,191,255,0.1);padding-top:10px;">
         <div style="font-size:9px;color:#4a6280;letter-spacing:1px;text-transform:uppercase;margin-bottom:6px;">Alert me when threats change</div>
         <div style="display:flex;gap:6px;">
             <input id="alert-email" type="email" placeholder="your@email.gov"
@@ -4349,6 +4400,40 @@ function openCountySitrep() {{
             if (btn) {{ btn.textContent = '📋 GENERATE BRIEFING'; btn.disabled = false; }}
         }});
 }}
+async function generateInlineBriefing(score, threatLevel, threatTexts, county) {{
+    const el = document.getElementById('inline-briefing');
+    if (!el) return;
+    el.innerHTML = '<div style="color:#4a6280;font-size:10px;letter-spacing:1px;padding:4px 0;">⏳ Generating briefing...</div>';
+    try {{
+        const r = await fetch('/api/sitrep', {{
+            method: 'POST',
+            headers: {{'Content-Type': 'application/json'}},
+            body: JSON.stringify({{ score, threat_level: threatLevel, threats: threatTexts, county }})
+        }});
+        const d = await r.json();
+        const text = (d.raw || d.text || '').trim();
+        if (!text) {{ el.innerHTML = ''; return; }}
+
+        // Parse SITUATION and ACTIONS sections
+        const sitMatch = text.match(/SITUATION:\s*([\s\S]*?)(?=ACTIONS:|$)/i);
+        const actMatch = text.match(/ACTIONS:\s*([\s\S]*?)$/i);
+        const sit = sitMatch ? sitMatch[1].trim() : text;
+        const act = actMatch ? actMatch[1].trim() : '';
+
+        el.innerHTML = `
+            <div style="border-top:1px solid rgba(88,191,255,0.15);padding-top:10px;margin-top:4px;">
+                <div style="font-size:9px;color:#58bfff;font-weight:700;letter-spacing:2px;text-transform:uppercase;margin-bottom:6px;">
+                    📋 LOCAL BRIEFING
+                </div>
+                <div style="font-size:11px;color:#c8d8eb;line-height:1.6;margin-bottom:8px;">${{sit}}</div>
+                ${{act ? `<div style="font-size:9px;color:#a0acbd;font-weight:700;letter-spacing:1px;text-transform:uppercase;margin-bottom:4px;">ACTIONS</div>
+                <div style="font-size:11px;color:#c8d8eb;line-height:1.6;">${{act}}</div>` : ''}}
+            </div>`;
+    }} catch(e) {{
+        el.innerHTML = '';
+    }}
+}}
+
 async function subscribeAlerts() {{
     const email  = (document.getElementById('alert-email')?.value || '').trim();
     const status = document.getElementById('subscribe-status');
