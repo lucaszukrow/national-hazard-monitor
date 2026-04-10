@@ -4158,6 +4158,36 @@ async function searchLocation() {{
         _searchContext = {{ lat, lng, label: placeName.split(',').slice(0,2).join(','), radius: radiusMiles }};
         dismissHero();  // remove hero panel if still visible
 
+        // ── ACTIVATE ONLY LAYERS WITH DATA IN THIS BUFFER ──────────────────
+        // Turn off all toggleable layers first, then turn on only those with
+        // matching features inside the buffer. GOES Infrared always excluded.
+        const _ALL_TOGGLEABLE = [
+            'warnings-fill','warnings-outline',
+            'spc-fill','spc-outline',
+            'eq-circles',
+            'fire-points','fire-perimeter-fill','fire-perimeter-outline',
+            'lightning-strikes',
+            'storm-cone','storm-cone-outline','storm-track',
+            'nexrad-layer','river-gauges','volcano-circles',
+            'drought-fill','fema-disasters','aqi-circles',
+            'shelter-circles','infra-normal','infra-at-risk',
+            'counties-fill','counties-outline'
+        ];
+        const _bufferActive = new Set();
+        if (warningsInBuffer.length > 0)   {{ _bufferActive.add('warnings-fill'); _bufferActive.add('warnings-outline'); }}
+        if (eqFeats.length > 0)            _bufferActive.add('eq-circles');
+        if (fireFeats.length > 0)          _bufferActive.add('fire-points');
+        if (stormFeats.length > 0)         _bufferActive.add('lightning-strikes');
+        if (perimInBuffer.length > 0)      {{ _bufferActive.add('fire-perimeter-fill'); _bufferActive.add('fire-perimeter-outline'); }}
+        // Always show warnings layer even if empty (it's the primary layer)
+        _bufferActive.add('warnings-fill'); _bufferActive.add('warnings-outline');
+
+        _ALL_TOGGLEABLE.forEach(id => {{
+            if (map.getLayer(id)) {{
+                map.setLayoutProperty(id, 'visibility', _bufferActive.has(id) ? 'visible' : 'none');
+            }}
+        }});
+
         // Show results
         document.getElementById('clear-search').style.display = 'block';
         const locationLabel = placeName.split(',').slice(0,2).join(',');
