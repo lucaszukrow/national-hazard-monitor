@@ -2581,12 +2581,12 @@ def mapbox_map():
 </div>
 
 <!-- Location Threat Analysis Panel (bottom-right) -->
-<div id="address-panel" class="glass-panel absolute z-10 pointer-events-auto overflow-hidden" style="bottom:24px;right:24px;width:300px;max-height:calc(100vh - 48px);">
-    <div style="background:rgba(0,0,0,0.3);padding:10px 16px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid rgba(61,73,87,0.3);">
+<div id="address-panel" class="glass-panel absolute z-10 pointer-events-auto overflow-hidden" style="bottom:24px;right:24px;width:300px;max-height:calc(100vh - 280px);display:flex;flex-direction:column;">
+    <div style="background:rgba(0,0,0,0.3);padding:10px 16px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid rgba(61,73,87,0.3);flex-shrink:0;">
         <h4 style="font-size:9px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#58bfff;">Threat Analysis</h4>
         <span class="material-symbols-outlined text-primary" style="font-size:14px;font-variation-settings:'FILL' 1;">security</span>
     </div>
-    <div style="padding:16px;">
+    <div style="padding:16px;overflow-y:auto;flex:1;min-height:0;">
         <label style="display:block;font-size:9px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#a0acbd;margin-bottom:8px;">Search Location</label>
         <div style="position:relative;">
             <input id="address-input" type="text" placeholder="ENTER ADDRESS OR CITY" style="width:100%;background:rgba(0,0,0,0.4);border:none;border-bottom:2px solid rgba(106,118,134,0.4);color:#dde9fb;font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;padding:8px 28px 8px 0;outline:none;transition:border-color 0.2s;font-family:'Inter',sans-serif;">
@@ -2634,7 +2634,7 @@ def mapbox_map():
                 Only selected inputs affect the score and local briefing.
             </div>
         </div>
-        <div id="threat-results" style="display:none;margin-top:12px;max-height:calc(100vh - 340px);overflow-y:auto;"></div>
+        <div id="threat-results" style="display:none;margin-top:12px;"></div>
         <button id="search-btn" onclick="searchLocation()" class="flex items-center justify-center gap-2 w-full mt-4 py-2.5 text-xs font-bold tracking-widest uppercase transition-all" style="background:#102131;border:1px solid rgba(61,73,87,0.4);color:#dde9fb;font-family:'Inter',sans-serif;cursor:pointer;letter-spacing:2px;">
             🔍 ANALYZE THREATS
             <span class="material-symbols-outlined" style="font-size:13px;">arrow_forward_ios</span>
@@ -3368,7 +3368,7 @@ function setupLayers() {{
     const toggleList = document.createElement('div');
     toggleList.style.cssText = `
         display: none; flex-direction: column; gap: 5px;
-        max-height: calc(100vh - 480px);
+        max-height: calc(100vh - 520px);
         overflow-y: auto;
         scrollbar-width: thin;
         scrollbar-color: rgba(0,180,255,0.3) transparent;
