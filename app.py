@@ -2581,7 +2581,7 @@ def mapbox_map():
 </div>
 
 <!-- Location Threat Analysis Panel (bottom-right) -->
-<div id="address-panel" class="glass-panel absolute z-10 pointer-events-auto overflow-hidden" style="bottom:24px;right:24px;width:300px;">
+<div id="address-panel" class="glass-panel absolute z-10 pointer-events-auto overflow-hidden" style="bottom:24px;right:24px;width:300px;max-height:calc(100vh - 48px);">
     <div style="background:rgba(0,0,0,0.3);padding:10px 16px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid rgba(61,73,87,0.3);">
         <h4 style="font-size:9px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#58bfff;">Threat Analysis</h4>
         <span class="material-symbols-outlined text-primary" style="font-size:14px;font-variation-settings:'FILL' 1;">security</span>
@@ -2634,9 +2634,9 @@ def mapbox_map():
                 Only selected inputs affect the score and local briefing.
             </div>
         </div>
-        <div id="threat-results" style="display:none;margin-top:12px;max-height:180px;overflow-y:auto;"></div>
+        <div id="threat-results" style="display:none;margin-top:12px;max-height:calc(100vh - 340px);overflow-y:auto;"></div>
         <button id="search-btn" onclick="searchLocation()" class="flex items-center justify-center gap-2 w-full mt-4 py-2.5 text-xs font-bold tracking-widest uppercase transition-all" style="background:#102131;border:1px solid rgba(61,73,87,0.4);color:#dde9fb;font-family:'Inter',sans-serif;cursor:pointer;letter-spacing:2px;">
-            RUN FULL SITE AUDIT
+            🔍 ANALYZE THREATS
             <span class="material-symbols-outlined" style="font-size:13px;">arrow_forward_ios</span>
         </button>
         <div id="clear-search" onclick="clearSearch()" style="display:none;text-align:center;margin-top:8px;font-size:10px;color:#a0acbd;cursor:pointer;letter-spacing:1px;">✕ Clear search</div>
@@ -3465,7 +3465,6 @@ function setupLayers() {{
     toggleContainer.appendChild(basemapSection);
     document.body.appendChild(toggleContainer);
 
-
     // ── LOAD STATS WITH RETRY ────────────────────────
     // Global hazard data for stat card fly-to
     let _latestWarnings    = null;
@@ -3645,6 +3644,20 @@ function setupLayers() {{
 map.on('load', function() {{
     setupLayers();
 }});
+
+// ── LAYER PANEL COLLAPSE (for search mode) ───────
+let _layerPanelHiddenForSearch = false;
+function collapseLayerPanelForSearch() {{
+    const p = document.getElementById('layer-panel');
+    if (p) {{ _layerPanelHiddenForSearch = true; p.style.display = 'none'; }}
+}}
+function restoreLayerPanelAfterSearch() {{
+    if (_layerPanelHiddenForSearch) {{
+        const p = document.getElementById('layer-panel');
+        if (p) p.style.display = 'flex';
+        _layerPanelHiddenForSearch = false;
+    }}
+}}
 
 // ── SITREP ────────────────────────────────────────
 let _sitrepRaw = '';
@@ -4275,21 +4288,21 @@ async function searchLocation() {{
             }});
 
         if (scoreInputs.firedetections && fireFeats.length > 0) {{
-            // Find closest fire
-            const closest = fireFeats.reduce((a, b) => {{
-                const da = turf.distance(userPt, a._pt, {{units:'miles'}});
-                const db = turf.distance(userPt, b._pt, {{units:'miles'}});
-                return da < db ? a : b;
+            let firePtsTotal = 0;
+            let closestDist = Infinity;
+            fireFeats.forEach(f => {{
+                const dist  = turf.distance(userPt, f._pt, {{units:'miles'}});
+                const decay = distanceDecay(dist, radiusMiles);
+                const pts   = Math.round(THREAT_WEIGHTS.wildfire_near * decay);
+                totalScore   += pts;
+                firePtsTotal += pts;
+                if (dist < closestDist) closestDist = dist;
             }});
-            const dist  = turf.distance(userPt, closest._pt, {{units:'miles'}});
-            const decay = distanceDecay(dist, radiusMiles);
-            const pts   = Math.round(THREAT_WEIGHTS.wildfire_near * decay);
-            totalScore += pts;
             addThreat({{
                 kind: 'fire_detection',
-                label: `🔥 ${{fireFeats.length}} Fire Detection(s) — closest ${{Math.round(dist)}}mi`,
-                points: pts,
-                dist,
+                label: `🔥 ${{fireFeats.length}} Fire Detection(s) — closest ${{Math.round(closestDist)}}mi`,
+                points: firePtsTotal,
+                dist: closestDist,
                 color: '#FF5000',
                 source: 'NASA FIRMS',
                 detail: String(fireFeats.length)
@@ -4430,25 +4443,31 @@ async function searchLocation() {{
                 const trackHits = stormsInBuffer.filter(f => (f.properties?.layer || '') === 'track');
                 const name = (coneHits[0]?.properties?.storm_name || trackHits[0]?.properties?.storm_name || 'Storm');
                 if (coneHits.length) {{
-                    const pts = THREAT_WEIGHTS.hurricane_cone;
+                    let dist = radiusMiles;
+                    try {{ const c = turf.centroid(coneHits[0]); dist = turf.distance(userPt, c, {{units:'miles'}}); }} catch(e) {{}}
+                    const decay = distanceDecay(dist, radiusMiles);
+                    const pts = Math.round(THREAT_WEIGHTS.hurricane_cone * decay);
                     totalScore += pts;
                     addThreat({{
                         kind: 'hurricane_cone',
                         label: `🌀 Forecast Cone intersects area — ${{name}}`,
                         points: pts,
-                        dist: radiusMiles / 3,
+                        dist,
                         color: '#FF6600',
                         source: 'NHC',
                         detail: name
                     }});
                 }} else if (trackHits.length) {{
-                    const pts = THREAT_WEIGHTS.hurricane_track;
+                    let dist = radiusMiles;
+                    try {{ const c = turf.centroid(trackHits[0]); dist = turf.distance(userPt, c, {{units:'miles'}}); }} catch(e) {{}}
+                    const decay = distanceDecay(dist, radiusMiles);
+                    const pts = Math.round(THREAT_WEIGHTS.hurricane_track * decay);
                     totalScore += pts;
                     addThreat({{
                         kind: 'hurricane_track',
                         label: `🌀 Storm track points within area — ${{name}}`,
                         points: pts,
-                        dist: radiusMiles / 2,
+                        dist,
                         color: '#FF6600',
                         source: 'NHC',
                         detail: name
@@ -4641,6 +4660,7 @@ function getProximityLabel(distMiles) {{
 }}
 
 function showResults(threats) {{
+    collapseLayerPanelForSearch();
     const div = document.getElementById('threat-results');
     div.style.display = 'block';
     div.innerHTML = threats.map(t => {{
@@ -5023,6 +5043,7 @@ document.addEventListener('keydown', function(e) {{
 }});
 
 function clearSearch(resetInput=true, restoreData=true) {{
+    restoreLayerPanelAfterSearch();
     if (searchMarker) {{ searchMarker.remove(); searchMarker = null; }}
     if (map.getLayer('buffer-fill'))    map.removeLayer('buffer-fill');
     if (map.getLayer('buffer-outline')) map.removeLayer('buffer-outline');
