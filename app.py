@@ -3783,7 +3783,7 @@ let bufferLayer  = null;
 
 // ── SCORE INPUTS (Immediate Threat Score) ─────────
 const SCORE_INPUTS_KEY = 'nhm-score-inputs-v1';
-const DEFAULT_SCORE_INPUTS = {
+const DEFAULT_SCORE_INPUTS = {{
     warnings: true,
     stormreports: true,
     earthquakes: true,
@@ -3791,7 +3791,7 @@ const DEFAULT_SCORE_INPUTS = {
     fireperimeters: true,
     rivergauges: false,
     hurricanes: false
-};
+}};
 
 function _loadScoreInputs() {{
     try {{
