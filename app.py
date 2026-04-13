@@ -4171,7 +4171,7 @@ async function searchLocation() {{
         const userPt = turf.point([lng, lat]);
 
         const addThreat = (obj) => {{
-            // obj: {kind,label,points,dist,color,source,detail}
+            // obj: {{kind,label,points,dist,color,source,detail}}
             threatObjs.push(obj);
             threats.push({{
                 type: 'threat',
