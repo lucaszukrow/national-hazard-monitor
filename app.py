@@ -874,7 +874,36 @@ def generate_briefing_from_client(score, threat_level, threats, county):
         return "groq package not installed.", None
 
     loc = county or "this area"
-    threat_list = "\n".join(f"  - {t}" for t in threats[:10]) if threats else "  - No active threats detected"
+
+    # threats can be either:
+    #  - list[str] (legacy)
+    #  - list[dict] with keys like {label, points, dist, source}
+    threat_lines = []
+    if isinstance(threats, list):
+        for t in threats[:12]:
+            if isinstance(t, str):
+                threat_lines.append(t.strip())
+            elif isinstance(t, dict):
+                label  = str(t.get("label", "")).strip()
+                src    = str(t.get("source", "")).strip()
+                pts    = t.get("points", None)
+                dist   = t.get("dist", None)
+                parts = []
+                if src:
+                    parts.append(f"[{src}]")
+                if label:
+                    parts.append(label)
+                if pts is not None:
+                    parts.append(f"(+{pts} pts)")
+                if dist is not None:
+                    try:
+                        parts.append(f"~{float(dist):.0f} mi")
+                    except Exception:
+                        pass
+                line = " ".join(parts).strip()
+                if line:
+                    threat_lines.append(line)
+    threat_list = "\n".join(f"  - {t}" for t in threat_lines) if threat_lines else "  - No active immediate threats detected"
 
     prompt = (
         f"Location: {loc}\n"
@@ -884,7 +913,11 @@ def generate_briefing_from_client(score, threat_level, threats, county):
         "Use EXACTLY this format — do not add a SEVERITY line, the score is already shown:\n\n"
         "SITUATION: [2 sentences on what is happening locally right now and who is affected]\n\n"
         "ACTIONS: [2-3 specific, concrete actions local emergency managers should take now]\n\n"
-        "Be specific to the listed threats. Plain language only. No markdown. No bullet points in ACTIONS — use numbered sentences."
+        "Hard rules:\n"
+        "- ONLY reference hazards that appear in the 'Active threats' list.\n"
+        "- Do NOT add new hazards, numbers, locations, or claims not present in the list.\n"
+        "- If the list shows no active immediate threats, explicitly say that.\n\n"
+        "Plain language only. No markdown. No bullet points in ACTIONS — use numbered sentences."
     )
     try:
         client = _GroqClient(api_key=GROQ_API_KEY)
@@ -2564,6 +2597,43 @@ def mapbox_map():
             <span id="buffer-label" style="font-size:10px;font-weight:700;color:#58bfff;">50 miles</span>
         </div>
         <input id="buffer-slider" type="range" min="5" max="200" value="50" step="5" style="width:100%;accent-color:#58bfff;">
+        <!-- Score Inputs (Immediate Threat Score) -->
+        <div style="margin-top:14px;padding-top:12px;border-top:1px solid rgba(88,191,255,0.12);">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;">
+                <div style="font-size:9px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#a0acbd;">Score Inputs</div>
+                <div style="display:flex;gap:6px;">
+                    <button type="button" onclick="applyScorePreset('immediate')" style="background:rgba(88,191,255,0.10);border:1px solid rgba(88,191,255,0.25);color:#58bfff;font-size:9px;font-weight:700;letter-spacing:1px;padding:4px 8px;cursor:pointer;">Immediate</button>
+                    <button type="button" onclick="applyScorePreset('weather')" style="background:rgba(255,255,255,0.04);border:1px solid rgba(61,73,87,0.35);color:#a0acbd;font-size:9px;font-weight:700;letter-spacing:1px;padding:4px 8px;cursor:pointer;">Weather</button>
+                    <button type="button" onclick="applyScorePreset('fire')" style="background:rgba(255,255,255,0.04);border:1px solid rgba(61,73,87,0.35);color:#a0acbd;font-size:9px;font-weight:700;letter-spacing:1px;padding:4px 8px;cursor:pointer;">Fire</button>
+                </div>
+            </div>
+            <div id="score-inputs" style="display:grid;grid-template-columns:1fr 1fr;gap:6px 10px;">
+                <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:#c8d8eb;cursor:pointer;">
+                    <input type="checkbox" id="si-warnings" checked style="accent-color:#58bfff;"> NWS Warnings
+                </label>
+                <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:#c8d8eb;cursor:pointer;">
+                    <input type="checkbox" id="si-stormreports" checked style="accent-color:#58bfff;"> Storm Reports
+                </label>
+                <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:#c8d8eb;cursor:pointer;">
+                    <input type="checkbox" id="si-earthquakes" checked style="accent-color:#58bfff;"> Earthquakes
+                </label>
+                <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:#c8d8eb;cursor:pointer;">
+                    <input type="checkbox" id="si-firedetections" checked style="accent-color:#58bfff;"> Fire Detections
+                </label>
+                <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:#c8d8eb;cursor:pointer;">
+                    <input type="checkbox" id="si-fireperimeters" checked style="accent-color:#58bfff;"> Fire Perimeters
+                </label>
+                <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:#c8d8eb;cursor:pointer;">
+                    <input type="checkbox" id="si-rivergauges" style="accent-color:#58bfff;"> Flood Gauges
+                </label>
+                <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:#c8d8eb;cursor:pointer;grid-column:1 / -1;">
+                    <input type="checkbox" id="si-hurricanes" style="accent-color:#58bfff;"> Hurricanes / Tropical Systems
+                </label>
+            </div>
+            <div style="margin-top:8px;font-size:9px;color:#6a7686;line-height:1.5;">
+                Only selected inputs affect the score and local briefing.
+            </div>
+        </div>
         <div id="threat-results" style="display:none;margin-top:12px;max-height:180px;overflow-y:auto;"></div>
         <button id="search-btn" onclick="searchLocation()" class="flex items-center justify-center gap-2 w-full mt-4 py-2.5 text-xs font-bold tracking-widest uppercase transition-all" style="background:#102131;border:1px solid rgba(61,73,87,0.4);color:#dde9fb;font-family:'Inter',sans-serif;cursor:pointer;letter-spacing:2px;">
             RUN FULL SITE AUDIT
@@ -3711,6 +3781,90 @@ const MAPBOX_TOKEN_JS = mapboxgl.accessToken;
 let searchMarker = null;
 let bufferLayer  = null;
 
+// ── SCORE INPUTS (Immediate Threat Score) ─────────
+const SCORE_INPUTS_KEY = 'nhm-score-inputs-v1';
+const DEFAULT_SCORE_INPUTS = {
+    warnings: true,
+    stormreports: true,
+    earthquakes: true,
+    firedetections: true,
+    fireperimeters: true,
+    rivergauges: false,
+    hurricanes: false
+};
+
+function _loadScoreInputs() {{
+    try {{
+        const raw = localStorage.getItem(SCORE_INPUTS_KEY);
+        if (!raw) return {{ ...DEFAULT_SCORE_INPUTS }};
+        const parsed = JSON.parse(raw);
+        return {{ ...DEFAULT_SCORE_INPUTS, ...(parsed || {{}}) }};
+    }} catch (e) {{
+        return {{ ...DEFAULT_SCORE_INPUTS }};
+    }}
+}}
+
+function _saveScoreInputs(v) {{
+    try {{ localStorage.setItem(SCORE_INPUTS_KEY, JSON.stringify(v)); }} catch (e) {{}}
+}}
+
+function readScoreInputsFromUI() {{
+    const get = (id, fallback) => {{
+        const el = document.getElementById(id);
+        return el ? !!el.checked : fallback;
+    }};
+    return {{
+        warnings:       get('si-warnings', true),
+        stormreports:   get('si-stormreports', true),
+        earthquakes:    get('si-earthquakes', true),
+        firedetections: get('si-firedetections', true),
+        fireperimeters: get('si-fireperimeters', true),
+        rivergauges:    get('si-rivergauges', false),
+        hurricanes:     get('si-hurricanes', false),
+    }};
+}}
+
+function writeScoreInputsToUI(v) {{
+    const set = (id, val) => {{ const el = document.getElementById(id); if (el) el.checked = !!val; }};
+    set('si-warnings',       v.warnings);
+    set('si-stormreports',   v.stormreports);
+    set('si-earthquakes',    v.earthquakes);
+    set('si-firedetections', v.firedetections);
+    set('si-fireperimeters', v.fireperimeters);
+    set('si-rivergauges',    v.rivergauges);
+    set('si-hurricanes',     v.hurricanes);
+}}
+
+function _toast(msg) {{
+    const note = document.createElement('div');
+    note.style.cssText = 'position:fixed;bottom:24px;right:24px;z-index:250;padding:10px 14px;' +
+        'background:rgba(4,15,27,0.92);border:1px solid rgba(88,191,255,0.25);' +
+        'color:#a8d8ff;font-size:11px;font-family:Inter,sans-serif;letter-spacing:0.6px;';
+    note.textContent = msg;
+    document.body.appendChild(note);
+    setTimeout(() => {{ try {{ note.remove(); }} catch(e) {{}} }}, 1600);
+}}
+
+function applyScorePreset(name) {{
+    let v = {{ ...DEFAULT_SCORE_INPUTS }};
+    if (name === 'weather') {{
+        v = {{ ...DEFAULT_SCORE_INPUTS,
+            firedetections: false, fireperimeters: false, earthquakes: false,
+            rivergauges: false, hurricanes: false
+        }};
+    }} else if (name === 'fire') {{
+        v = {{ ...DEFAULT_SCORE_INPUTS,
+            warnings: false, stormreports: false, earthquakes: false,
+            rivergauges: false, hurricanes: false
+        }};
+    }} else {{
+        v = {{ ...DEFAULT_SCORE_INPUTS }};
+    }}
+    writeScoreInputsToUI(v);
+    _saveScoreInputs(v);
+    _toast('Score preset: ' + (name || 'immediate').toUpperCase());
+}}
+
 // Update buffer label and re-run analysis when slider changes
 let _sliderDebounce = null;
 document.getElementById('buffer-slider').addEventListener('input', function() {{
@@ -3725,6 +3879,18 @@ document.getElementById('buffer-slider').addEventListener('input', function() {{
 // Enter key triggers search
 document.getElementById('address-input').addEventListener('keypress', function(e) {{
     if (e.key === 'Enter') searchLocation();
+}});
+
+// Restore persisted score inputs on load and persist changes
+document.addEventListener('DOMContentLoaded', () => {{
+    const v = _loadScoreInputs();
+    writeScoreInputsToUI(v);
+    ['si-warnings','si-stormreports','si-earthquakes','si-firedetections','si-fireperimeters','si-rivergauges','si-hurricanes']
+        .forEach(id => {{
+            const el = document.getElementById(id);
+            if (!el) return;
+            el.addEventListener('change', () => _saveScoreInputs(readScoreInputsFromUI()));
+        }});
 }});
 
 // ── FEMA NRI LOOKUP ──────────────────────────────
@@ -3888,6 +4054,8 @@ async function searchLocation() {{
     btn.disabled = true;
 
     let lat, lng, placeName, nriState = '', nriCounty = '';
+    const scoreInputs = readScoreInputsFromUI();
+    _saveScoreInputs(scoreInputs);
 
     try {{
         if (_gpsOverride) {{
@@ -3998,11 +4166,25 @@ async function searchLocation() {{
         ]);
 
         const threats = [];
+        const threatObjs = [];
         let totalScore = 0;
         const userPt = turf.point([lng, lat]);
 
+        const addThreat = (obj) => {{
+            // obj: {kind,label,points,dist,color,source,detail}
+            threatObjs.push(obj);
+            threats.push({{
+                type: 'threat',
+                color: obj.color,
+                dist:  obj.dist,
+                points: obj.points,
+                source: obj.source,
+                text:  obj.label
+            }});
+        }};
+
         // ── NWS WARNINGS ─────────────────────────────
-        const warningsInBuffer = warnings.features.filter(f => {{
+        const warningsInBuffer = (warnings.features || []).filter(f => {{
             try {{
                 if (!f.geometry) return false;
                 if (f.geometry.type === 'Point') {{
@@ -4012,7 +4194,7 @@ async function searchLocation() {{
             }} catch(e) {{ return false; }}
         }});
 
-        warningsInBuffer.forEach(f => {{
+        if (scoreInputs.warnings) warningsInBuffer.forEach(f => {{
             const phenom = (f.properties?.phenom || '').toUpperCase();
             const sig    = (f.properties?.sig    || '').toUpperCase();
             let weight   = THREAT_WEIGHTS.other_warning;
@@ -4037,15 +4219,19 @@ async function searchLocation() {{
             const decay   = distanceDecay(dist, radiusMiles);
             const pts     = Math.round(weight * decay);
             totalScore   += pts;
-
-            threats.push({{
-                type: 'threat', color, dist,
-                text: `${{label}} (+${{pts}} pts)`
+            addThreat({{
+                kind: 'warning',
+                label: `${{label}}`,
+                points: pts,
+                dist,
+                color,
+                source: 'NWS',
+                detail: phenom + '/' + sig
             }});
         }});
 
         // ── EARTHQUAKES ───────────────────────────────
-        const eqFeats = earthquakes.features
+        const eqFeats = (earthquakes.features || [])
             .filter(f => f.geometry?.coordinates)
             .map(f => ({{
                 ...f,
@@ -4056,7 +4242,7 @@ async function searchLocation() {{
                 catch(e) {{ return false; }}
             }});
 
-        eqFeats.forEach(f => {{
+        if (scoreInputs.earthquakes) eqFeats.forEach(f => {{
             const mag  = parseFloat(f.properties?.mag || 0);
             const dist = turf.distance(userPt, f._pt, {{units: 'miles'}});
             let weight = mag >= 5 ? THREAT_WEIGHTS.earthquake_m5
@@ -4065,14 +4251,19 @@ async function searchLocation() {{
             const decay = distanceDecay(dist, radiusMiles);
             const pts   = Math.round(weight * decay);
             totalScore += pts;
-            threats.push({{
-                type: 'threat', color: '#00B4FF', dist,
-                text: `🔴 Earthquake M${{mag.toFixed(1)}} — ${{f.properties?.place || 'Unknown'}} (+${{pts}} pts)`
+            addThreat({{
+                kind: 'earthquake',
+                label: `🔴 Earthquake M${{mag.toFixed(1)}} — ${{f.properties?.place || 'Unknown'}}`,
+                points: pts,
+                dist,
+                color: '#00B4FF',
+                source: 'USGS',
+                detail: 'M' + mag.toFixed(1)
             }});
         }});
 
         // ── WILDFIRES ─────────────────────────────────
-        const fireFeats = fires.features
+        const fireFeats = (fires.features || [])
             .filter(f => f.geometry?.coordinates)
             .map(f => ({{
                 ...f,
@@ -4083,7 +4274,7 @@ async function searchLocation() {{
                 catch(e) {{ return false; }}
             }});
 
-        if (fireFeats.length > 0) {{
+        if (scoreInputs.firedetections && fireFeats.length > 0) {{
             // Find closest fire
             const closest = fireFeats.reduce((a, b) => {{
                 const da = turf.distance(userPt, a._pt, {{units:'miles'}});
@@ -4094,14 +4285,19 @@ async function searchLocation() {{
             const decay = distanceDecay(dist, radiusMiles);
             const pts   = Math.round(THREAT_WEIGHTS.wildfire_near * decay);
             totalScore += pts;
-            threats.push({{
-                type: 'threat', color: '#FF5000', dist,
-                text: `🔥 ${{fireFeats.length}} Wildfire Detection(s) — closest ${{Math.round(dist)}}mi (+${{pts}} pts)`
+            addThreat({{
+                kind: 'fire_detection',
+                label: `🔥 ${{fireFeats.length}} Fire Detection(s) — closest ${{Math.round(dist)}}mi`,
+                points: pts,
+                dist,
+                color: '#FF5000',
+                source: 'NASA FIRMS',
+                detail: String(fireFeats.length)
             }});
         }}
 
         // ── STORM REPORTS ─────────────────────────────
-        const stormFeats = lightning.features
+        const stormFeats = (lightning.features || [])
             .filter(f => f.geometry?.coordinates)
             .map(f => ({{
                 ...f,
@@ -4112,9 +4308,10 @@ async function searchLocation() {{
                 catch(e) {{ return false; }}
             }});
 
-        if (stormFeats.length > 0) {{
+        if (scoreInputs.stormreports && stormFeats.length > 0) {{
             // Time decay — recent reports weighted more
             const now = Date.now();
+            let stormPtsTotal = 0;
             stormFeats.forEach(f => {{
                 const validTime = new Date(f.properties?.valid || now).getTime();
                 const hoursAgo  = (now - validTime) / 3600000;
@@ -4123,28 +4320,34 @@ async function searchLocation() {{
                 const decay     = distanceDecay(dist, radiusMiles);
                 const pts       = Math.round(THREAT_WEIGHTS.storm_report * decay * recency);
                 totalScore     += pts;
+                stormPtsTotal  += pts;
             }});
             const types = [...new Set(stormFeats.map(f => f.properties?.typetext || 'Storm').slice(0,3))];
-            threats.push({{
-                type: 'threat', color: '#FFFF00',
-                dist: turf.distance(userPt,
-                    stormFeats.reduce((a,b) =>
-                        turf.distance(userPt,a._pt,{{units:'miles'}}) <
-                        turf.distance(userPt,b._pt,{{units:'miles'}}) ? a : b
-                    )._pt, {{units:'miles'}}),
-                text: `⚡ ${{stormFeats.length}} Storm Report(s) — ${{types.join(', ')}}`
+            const closestStorm = stormFeats.reduce((a,b) =>
+                turf.distance(userPt,a._pt,{{units:'miles'}}) <
+                turf.distance(userPt,b._pt,{{units:'miles'}}) ? a : b
+            );
+            const distClosest = turf.distance(userPt, closestStorm._pt, {{units:'miles'}});
+            addThreat({{
+                kind: 'storm_report',
+                label: `⚡ ${{stormFeats.length}} Storm Report(s) — ${{types.join(', ')}}`,
+                points: stormPtsTotal,
+                dist: distClosest,
+                color: '#FFFF00',
+                source: 'NWS LSR',
+                detail: String(stormFeats.length)
             }});
         }}
 
         // ── FIRE PERIMETERS ───────────────────────────
-        const perimInBuffer = perimeters.features.filter(f => {{
+        const perimInBuffer = (perimeters.features || []).filter(f => {{
             try {{
                 if (!f.geometry) return false;
                 return turf.booleanIntersects(f, buffer);
             }} catch(e) {{ return false; }}
         }});
 
-        perimInBuffer.forEach(f => {{
+        if (scoreInputs.fireperimeters) perimInBuffer.forEach(f => {{
             const acres = parseFloat(f.properties?.GISAcres || 0);
             const name  = f.properties?.IncidentName || 'Active Fire';
             let weight  = THREAT_WEIGHTS.fire_perimeter;
@@ -4161,11 +4364,98 @@ async function searchLocation() {{
             const decay = distanceDecay(dist, radiusMiles);
             const pts   = Math.round(weight * decay);
             totalScore += pts;
-            threats.push({{
-                type: 'threat', color: '#FF4500', dist,
-                text: `🔥 ${{name}} — ${{Math.round(acres).toLocaleString()}} acres (${{f.properties?.PercentContained||0}}% contained) (+${{pts}} pts)`
+            addThreat({{
+                kind: 'fire_perimeter',
+                label: `🔥 ${{name}} — ${{Math.round(acres).toLocaleString()}} acres (${{f.properties?.PercentContained||0}}% contained)`,
+                points: pts,
+                dist,
+                color: '#FF4500',
+                source: 'WFIGS',
+                detail: Math.round(acres)
             }});
         }});
+
+        // ── RIVER FLOOD GAUGES (optional) ─────────────
+        if (scoreInputs.rivergauges) {{
+            const gaugesInBuffer = (riverData.features || [])
+                .filter(f => f.geometry?.coordinates)
+                .map(f => ({{ ...f, _pt: turf.point([f.geometry.coordinates[0], f.geometry.coordinates[1]]) }}))
+                .filter(f => {{
+                    try {{ return turf.booleanPointInPolygon(f._pt, buffer); }}
+                    catch(e) {{ return false; }}
+                }});
+
+            const statusWeight = (status) => {{
+                const s = (status || '').toLowerCase();
+                if (s === 'major')    return THREAT_WEIGHTS.flood_gauge_major;
+                if (s === 'moderate') return THREAT_WEIGHTS.flood_gauge_moderate;
+                if (s === 'minor')    return THREAT_WEIGHTS.flood_gauge_minor;
+                if (s === 'action')   return THREAT_WEIGHTS.flood_gauge_action;
+                return 0;
+            }};
+
+            gaugesInBuffer.forEach(f => {{
+                const p = f.properties || {{}};
+                const w = statusWeight(p.status);
+                if (!w) return;
+                const dist = turf.distance(userPt, f._pt, {{units:'miles'}});
+                const decay = distanceDecay(dist, radiusMiles);
+                const pts   = Math.round(w * decay);
+                totalScore += pts;
+                addThreat({{
+                    kind: 'flood_gauge',
+                    label: `🌊 Flood Gauge — ${{(p.location||p.name||'Gauge')}} (${{String(p.status||'').toUpperCase()}})`,
+                    points: pts,
+                    dist,
+                    color: '#00BFFF',
+                    source: 'NOAA AHPS',
+                    detail: p.gaugelid || ''
+                }});
+            }});
+        }}
+
+        // ── HURRICANES / TROPICAL SYSTEMS (optional) ───
+        if (scoreInputs.hurricanes) {{
+            const stormsInBuffer = (stormsData.features || []).filter(f => {{
+                try {{
+                    if (!f.geometry) return false;
+                    if (f.geometry.type === 'Point') {{
+                        return turf.booleanPointInPolygon(turf.point(f.geometry.coordinates), buffer);
+                    }}
+                    return turf.booleanIntersects(f, buffer);
+                }} catch(e) {{ return false; }}
+            }});
+            if (stormsInBuffer.length) {{
+                const coneHits  = stormsInBuffer.filter(f => (f.properties?.layer || '') === 'cone');
+                const trackHits = stormsInBuffer.filter(f => (f.properties?.layer || '') === 'track');
+                const name = (coneHits[0]?.properties?.storm_name || trackHits[0]?.properties?.storm_name || 'Storm');
+                if (coneHits.length) {{
+                    const pts = THREAT_WEIGHTS.hurricane_cone;
+                    totalScore += pts;
+                    addThreat({{
+                        kind: 'hurricane_cone',
+                        label: `🌀 Forecast Cone intersects area — ${{name}}`,
+                        points: pts,
+                        dist: radiusMiles / 3,
+                        color: '#FF6600',
+                        source: 'NHC',
+                        detail: name
+                    }});
+                }} else if (trackHits.length) {{
+                    const pts = THREAT_WEIGHTS.hurricane_track;
+                    totalScore += pts;
+                    addThreat({{
+                        kind: 'hurricane_track',
+                        label: `🌀 Storm track points within area — ${{name}}`,
+                        points: pts,
+                        dist: radiusMiles / 2,
+                        color: '#FF6600',
+                        source: 'NHC',
+                        detail: name
+                    }});
+                }}
+            }}
+        }}
 
         // ── CAP SCORE & SORT ──────────────────────────
         totalScore = Math.min(100, Math.round(totalScore));
@@ -4177,13 +4467,21 @@ async function searchLocation() {{
         _searchContext = {{ lat, lng, label: placeName.split(',').slice(0,2).join(','), radius: radiusMiles }};
         dismissHero();  // remove hero panel if still visible
 
-        // ── ACTIVATE ALL LAYERS (except GOES Infrared) ──────────────────────
-        // Turn on every toggleable layer so the user sees everything at once.
-        // GOES Infrared is intentionally excluded — it covers the full CONUS
-        // and is too visually heavy to auto-enable.
-        // nexrad-layer is a raster tile source — it covers the full CONUS and
-        // cannot be clipped to the buffer circle. Exclude it like GOES Infrared.
-        const _ALL_TOGGLEABLE = [
+        // ── ACTIVATE SELECTED LAYERS (Immediate Threat Score) ───────────────
+        // Only turn on layers the user chose to include in scoring + counties context.
+        const _AUTO_ON = [];
+        if (scoreInputs.warnings)       _AUTO_ON.push('warnings-fill','warnings-outline');
+        if (scoreInputs.earthquakes)    _AUTO_ON.push('eq-circles');
+        if (scoreInputs.firedetections) _AUTO_ON.push('fire-points');
+        if (scoreInputs.fireperimeters) _AUTO_ON.push('fire-perimeter-fill','fire-perimeter-outline');
+        if (scoreInputs.stormreports)   _AUTO_ON.push('lightning-strikes');
+        if (scoreInputs.rivergauges)    _AUTO_ON.push('river-gauges');
+        if (scoreInputs.hurricanes)     _AUTO_ON.push('storm-cone','storm-cone-outline','storm-track');
+        // Always show affected counties in analysis mode (helps interpret exposure)
+        _AUTO_ON.push('counties-fill','counties-outline');
+
+        // Turn off most layers to avoid clutter, then enable selected ones.
+        const _TOGGLEABLE = [
             'warnings-fill','warnings-outline',
             'spc-fill','spc-outline',
             'eq-circles',
@@ -4193,12 +4491,14 @@ async function searchLocation() {{
             'river-gauges','volcano-circles',
             'drought-fill','fema-disasters','aqi-circles',
             'shelter-circles','infra-normal','infra-at-risk',
-            'counties-fill','counties-outline'
+            'counties-fill','counties-outline',
+            'nexrad-layer','goes-ir-layer'
         ];
-        _ALL_TOGGLEABLE.forEach(id => {{
-            if (map.getLayer(id)) {{
-                map.setLayoutProperty(id, 'visibility', 'visible');
-            }}
+        _TOGGLEABLE.forEach(id => {{
+            if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', 'none');
+        }});
+        _AUTO_ON.forEach(id => {{
+            if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', 'visible');
         }});
 
         // ── CLIP ALL SOURCES TO THE BUFFER ZONE ─────────────────────────────
@@ -4239,22 +4539,24 @@ async function searchLocation() {{
             }})
         }});
 
-        // Polygon sources — clip to buffer boundary via turf.intersect
-        if (map.getSource('warnings'))        map.getSource('warnings').setData(polyFilter(warnings));
-        if (map.getSource('fire_perimeters')) map.getSource('fire_perimeters').setData(polyFilter(perimeters));
-        if (map.getSource('spc'))             map.getSource('spc').setData(polyFilter(spcData));
-        if (map.getSource('drought'))         map.getSource('drought').setData(polyFilter(droughtData));
-        if (map.getSource('storms'))          map.getSource('storms').setData(polyFilter(stormsData));
-        if (map.getSource('counties'))        map.getSource('counties').setData(polyFilter(countiesData));
-        // Point sources — keep only points inside the buffer circle
-        if (map.getSource('earthquakes'))     map.getSource('earthquakes').setData(ptFilter(earthquakes));
-        if (map.getSource('fires'))           map.getSource('fires').setData(ptFilter(fires));
-        if (map.getSource('lightning'))       map.getSource('lightning').setData(ptFilter(lightning));
-        if (map.getSource('river_gauges'))    map.getSource('river_gauges').setData(ptFilter(riverData));
-        if (map.getSource('volcanoes'))       map.getSource('volcanoes').setData(ptFilter(volcanoData));
-        if (map.getSource('fema_disasters'))  map.getSource('fema_disasters').setData(ptFilter(femaData));
-        if (map.getSource('air_quality'))     map.getSource('air_quality').setData(ptFilter(aqiData));
-        if (map.getSource('shelters'))        map.getSource('shelters').setData(ptFilter(shelterData));
+        // Clip only the selected immediate layers (plus counties context)
+        if (scoreInputs.warnings && map.getSource('warnings'))
+            map.getSource('warnings').setData(polyFilter(warnings));
+        if (scoreInputs.fireperimeters && map.getSource('fire_perimeters'))
+            map.getSource('fire_perimeters').setData(polyFilter(perimeters));
+        if (scoreInputs.hurricanes && map.getSource('storms'))
+            map.getSource('storms').setData(polyFilter(stormsData));
+        if (map.getSource('counties'))
+            map.getSource('counties').setData(polyFilter(countiesData));
+
+        if (scoreInputs.earthquakes && map.getSource('earthquakes'))
+            map.getSource('earthquakes').setData(ptFilter(earthquakes));
+        if (scoreInputs.firedetections && map.getSource('fires'))
+            map.getSource('fires').setData(ptFilter(fires));
+        if (scoreInputs.stormreports && map.getSource('lightning'))
+            map.getSource('lightning').setData(ptFilter(lightning));
+        if (scoreInputs.rivergauges && map.getSource('river_gauges'))
+            map.getSource('river_gauges').setData(ptFilter(riverData));
 
         // Show results
         document.getElementById('clear-search').style.display = 'block';
@@ -4265,7 +4567,6 @@ async function searchLocation() {{
         const nriHtml = buildNRIPanel(nriData, locationLabel.split(',')[0]);
 
         const threatLevel = getThreatLevel(totalScore).label;
-        const threatTexts = threats.map(t => t.text);
 
         if (threats.length === 0) {{
             showResults([
@@ -4282,8 +4583,8 @@ async function searchLocation() {{
             ]);
         }}
 
-        // Auto-generate county briefing using the computed score + threat list
-        generateInlineBriefing(totalScore, threatLevel, threatTexts, locationLabel);
+        // Auto-generate county briefing using computed score + structured threats
+        generateInlineBriefing(totalScore, threatLevel, threatObjs, locationLabel, scoreInputs);
 
     }} catch(err) {{
         console.error('Search error:', err);
@@ -4309,6 +4610,13 @@ const THREAT_WEIGHTS = {{
     flood_warning:      15,
     winter_storm:       10,
     other_warning:       8,
+    // Optional immediate add-ons
+    flood_gauge_action:   6,
+    flood_gauge_minor:   10,
+    flood_gauge_moderate: 16,
+    flood_gauge_major:   22,
+    hurricane_cone:      20,
+    hurricane_track:     12,
 }};
 
 function getThreatLevel(score) {{
@@ -4375,8 +4683,13 @@ function showResults(threats) {{
                 ${{prox ? `<span style="font-size:9px;color:${{prox.color}};font-weight:700;
                     letter-spacing:1px;margin-left:8px;flex-shrink:0;">${{prox.label}}</span>` : ''}}
             </div>
-            ${{t.dist !== undefined ? `<div style="font-size:9px;color:rgba(255,255,255,0.3);margin-top:2px;">
-                ${{Math.round(t.dist)}} miles away</div>` : ''}}
+            <div style="display:flex;justify-content:space-between;gap:10px;margin-top:2px;">
+                ${{t.dist !== undefined ? `<div style="font-size:9px;color:rgba(255,255,255,0.3);">
+                    ${{Math.round(t.dist)}} miles away</div>` : `<div></div>`}}
+                <div style="font-size:9px;color:rgba(255,255,255,0.35);white-space:nowrap;">
+                    ${{t.source ? t.source : ''}}${{t.points !== undefined ? ` · +${{t.points}} pts` : ''}}
+                </div>
+            </div>
         </div>`;
     }}).join('');
 
@@ -4498,7 +4811,7 @@ function openCountySitrep() {{
             if (btn) {{ btn.textContent = '📋 GENERATE BRIEFING'; btn.disabled = false; }}
         }});
 }}
-async function generateInlineBriefing(score, threatLevel, threatTexts, county) {{
+async function generateInlineBriefing(score, threatLevel, threatObjs, county, scoreInputs) {{
     const el = document.getElementById('inline-briefing');
     if (!el) return;
     el.innerHTML = '<div style="color:#4a6280;font-size:10px;letter-spacing:1px;padding:4px 0;">⏳ Generating briefing...</div>';
@@ -4506,7 +4819,13 @@ async function generateInlineBriefing(score, threatLevel, threatTexts, county) {
         const r = await fetch('/api/sitrep', {{
             method: 'POST',
             headers: {{'Content-Type': 'application/json'}},
-            body: JSON.stringify({{ score, threat_level: threatLevel, threats: threatTexts, county }})
+            body: JSON.stringify({{
+                score,
+                threat_level: threatLevel,
+                threats: threatObjs || [],
+                county,
+                score_inputs: scoreInputs || null
+            }})
         }});
         const d = await r.json();
         const text = (d.raw || d.text || '').trim();
