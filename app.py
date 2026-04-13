@@ -3414,7 +3414,23 @@ function setupLayers() {{
         const ids = Array.isArray(layerId) ? layerId : [layerId];
         btn.onclick = () => {{
             on = !on;
-            ids.forEach(id => map.setLayoutProperty(id, 'visibility', on ? 'visible' : 'none'));
+            const refreshed = new Set();
+            ids.forEach(id => {{
+                map.setLayoutProperty(id, 'visibility', on ? 'visible' : 'none');
+                // When toggling ON without an active search, ensure source has data
+                if (on && _searchContext === null) {{
+                    try {{
+                        const srcName = map.getLayer(id)?.source;
+                        if (srcName && !refreshed.has(srcName) && map.getSource(srcName)?.setData) {{
+                            refreshed.add(srcName);
+                            fetch('/api/' + srcName + '?t=' + Date.now())
+                                .then(r => r.json())
+                                .then(d => {{ if (map.getSource(srcName)) map.getSource(srcName).setData(d); }})
+                                .catch(() => {{}});
+                        }}
+                    }} catch(e) {{}}
+                }}
+            }});
             btn.textContent = (on ? '🟢' : '⚫') + ' ' + label;
             btn.style.color = on ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.4)';
         }};
@@ -3547,7 +3563,13 @@ function setupLayers() {{
                 srcs.forEach((src, i) => {{
                     setTimeout(() => {{
                         if (map.getSource(src)) {{
-                            map.getSource(src).setData('/api/' + src.replace('-heat','') + '?t=' + t);
+                            // Fetch JSON objects explicitly — passing URLs to setData()
+                            // can defer for hidden layers, leaving sources empty until
+                            // the layer is toggled visible.
+                            fetch('/api/' + src + '?t=' + t)
+                                .then(r => r.json())
+                                .then(d => {{ if (map.getSource(src)) map.getSource(src).setData(d); }})
+                                .catch(() => {{}});
                         }}
                     }}, i * 15);
                 }});
