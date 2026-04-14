@@ -1036,7 +1036,8 @@ def check_and_send_alerts(warnings, earthquakes, storms, affected):
             continue
         state["seen_alert_ids"].add(event_id)
 
-        depth = props.get("depth", "?")
+        coords = feat.get("geometry", {}).get("coordinates", [])
+        depth = round(coords[2], 1) if len(coords) >= 3 and coords[2] is not None else "?"
         eq_ts = props.get("time", 0)
         if eq_ts:
             eq_time_str = datetime.datetime.utcfromtimestamp(eq_ts / 1000).strftime("%Y-%m-%d %H:%M:%S UTC")
@@ -1103,9 +1104,10 @@ def check_and_send_alerts(warnings, earthquakes, storms, affected):
 def run_update():
     """Download all data and rebuild map. Runs in background thread."""
     global state
-    if state["updating"]:
-        return
-    state["updating"] = True
+    with state_lock:
+        if state["updating"]:
+            return
+        state["updating"] = True
     print(f"\n{'='*50}")
     print(f"  UPDATE: {datetime.datetime.now()}")
     print(f"{'='*50}")
@@ -1219,6 +1221,7 @@ def run_update():
             "warnings":        state["warnings"],
             "spc":             state["spc"],
             "earthquakes":     state["earthquakes"],
+            "storms":          state["storms"],
             "fires":           state["fires"],
             "lightning":       state["lightning"],
             "fire_perimeters": state["fire_perimeters"],
