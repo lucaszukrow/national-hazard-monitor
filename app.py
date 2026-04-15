@@ -2386,7 +2386,7 @@ def mapbox_map():
     </div>
     <div style="width:1px;height:24px;background:rgba(61,73,87,0.5);"></div>
     <nav class="flex items-center gap-5">
-        <a href="#" style="font-size:10px;font-weight:700;letter-spacing:2px;color:#58bfff;text-transform:uppercase;border-bottom:2px solid #58bfff;padding-bottom:2px;">GLOBAL</a>
+        <a href="#" onclick="event.preventDefault();showHazardOverview();" style="font-size:10px;font-weight:700;letter-spacing:2px;color:#58bfff;text-transform:uppercase;border-bottom:2px solid #58bfff;padding-bottom:2px;cursor:pointer;">GLOBAL</a>
         <a href="#" style="font-size:10px;font-weight:700;letter-spacing:2px;color:#6a7686;text-transform:uppercase;">REGIONAL</a>
         <a href="/analytics/" style="font-size:10px;font-weight:700;letter-spacing:2px;color:#6a7686;text-transform:uppercase;">ANALYTICS</a>
     </nav>
@@ -2504,11 +2504,11 @@ def mapbox_map():
     </div>
 </div>
 
-<!-- Stat Cards + Hazard Chart (top-left) -->
-<div id="stat-cards-wrap" class="absolute z-10 pointer-events-auto" style="left:256px;top:72px;width:370px;">
-    <div id="stats-collapse-bar" class="glass-panel" style="display:flex;align-items:center;justify-content:space-between;padding:6px 12px;margin-bottom:8px;cursor:pointer;" onclick="toggleStatsPanel()">
+<!-- Stat Cards + Hazard Chart (top-left) — hidden by default, shown via GLOBAL nav link -->
+<div id="stat-cards-wrap" class="absolute z-10 pointer-events-auto" style="left:256px;top:72px;width:370px;display:none;">
+    <div id="stats-collapse-bar" class="glass-panel" style="display:flex;align-items:center;justify-content:space-between;padding:6px 12px;margin-bottom:8px;">
         <span style="font-size:9px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#58bfff;font-family:'Space Grotesk',sans-serif;">◈ Hazard Overview</span>
-        <span id="stats-arrow" style="font-size:10px;color:#58bfff;transition:transform 0.2s;transform:rotate(180deg);">▲</span>
+        <span onclick="hideHazardOverview()" style="font-size:14px;color:#a0acbd;cursor:pointer;line-height:1;padding:0 4px;transition:color 0.15s;" onmouseover="this.style.color='#ff716c'" onmouseout="this.style.color='#a0acbd'" title="Close">✕</span>
     </div>
     <div id="stats-body">
     <div class="grid grid-cols-2 gap-3">
@@ -2747,14 +2747,13 @@ function toggleLayerPanel() {{
     p.style.boxShadow = '4px 0 24px rgba(88,191,255,0.35)';
     setTimeout(() => {{ p.style.boxShadow = ''; }}, 900);
 }}
-function toggleStatsPanel() {{
-    const body = document.getElementById('stats-body');
-    const arrow = document.getElementById('stats-arrow');
-    if (!body || !arrow) return;
-    const nowOpen = body.style.display === 'none';
-    body.style.display = nowOpen ? 'block' : 'none';
-    arrow.style.transform = nowOpen ? 'rotate(180deg)' : 'rotate(0deg)';
-    try {{ localStorage.setItem('nhm_stats_open', nowOpen ? '1' : '0'); }} catch(e) {{}}
+function showHazardOverview() {{
+    const wrap = document.getElementById('stat-cards-wrap');
+    if (wrap) wrap.style.display = 'block';
+}}
+function hideHazardOverview() {{
+    const wrap = document.getElementById('stat-cards-wrap');
+    if (wrap) wrap.style.display = 'none';
 }}
 function toggleAddressPanel() {{
     const body = document.getElementById('address-body');
@@ -2765,10 +2764,9 @@ function toggleAddressPanel() {{
     arrow.style.transform = nowOpen ? 'rotate(180deg)' : 'rotate(0deg)';
     try {{ localStorage.setItem('nhm_threat_open', nowOpen ? '1' : '0'); }} catch(e) {{}}
 }}
-// Restore collapse state on load
+// Restore threat panel collapse state on load
 document.addEventListener('DOMContentLoaded', () => {{
     try {{
-        if (localStorage.getItem('nhm_stats_open') === '0') toggleStatsPanel();
         if (localStorage.getItem('nhm_threat_open') === '0') toggleAddressPanel();
     }} catch(e) {{}}
 }});
