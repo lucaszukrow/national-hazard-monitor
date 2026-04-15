@@ -1959,7 +1959,13 @@ def mapbox_map():
 <html class="dark" lang="en">
 <head>
     <meta charset="utf-8"/>
-    <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+    <meta content="width=device-width, initial-scale=1.0, viewport-fit=cover" name="viewport"/>
+    <meta name="theme-color" content="#040f1b"/>
+    <meta name="apple-mobile-web-app-capable" content="yes"/>
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+    <meta name="apple-mobile-web-app-title" content="Hazard Monitor"/>
+    <meta name="mobile-web-app-capable" content="yes"/>
+    <meta name="format-detection" content="telephone=no"/>
     <title>National All-Hazards Monitor</title>
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
     <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
@@ -1969,9 +1975,26 @@ def mapbox_map():
     <!-- Chart.js removed — hazard overview now uses inline HTML bars -->
     <style>
         /* ── 1. RESET & BASE ─────────────────────────────── */
+        :root {{
+            --safe-top: env(safe-area-inset-top, 0px);
+            --safe-bottom: env(safe-area-inset-bottom, 0px);
+            --safe-left: env(safe-area-inset-left, 0px);
+            --safe-right: env(safe-area-inset-right, 0px);
+            --header-h: 56px;        /* measured desktop top header height */
+            --sheet-peek: 64px;      /* collapsed bottom-sheet handle */
+            --fab-size: 52px;
+        }}
         * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-        body {{ font-family: 'Inter', sans-serif; background: #040f1b; overflow: hidden; color: #dde9fb; }}
+        html, body {{ -webkit-text-size-adjust: 100%; -webkit-tap-highlight-color: transparent; }}
+        body {{ font-family: 'Inter', sans-serif; background: #040f1b; overflow: hidden; color: #dde9fb; overscroll-behavior: none; }}
         #map {{ position: absolute; top: 0; bottom: 0; width: 100%; }}
+        /* Prevent iOS zoom on text input focus */
+        input, textarea, select {{ font-size: 16px; }}
+        /* Any scrollable panel gets proper touch scrolling */
+        .scrollable-panel, .overflow-y-auto, [style*="overflow-y:auto"], [style*="overflow-y: auto"] {{
+            -webkit-overflow-scrolling: touch;
+            overscroll-behavior: contain;
+        }}
 
         /* ── 2. COMPONENT CLASSES ────────────────────────── */
         .material-symbols-outlined {{ font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24; display: inline-block; line-height: 1; vertical-align: middle; }}
@@ -2034,17 +2057,225 @@ def mapbox_map():
         .nri-label {{ color: rgba(160,172,189,0.8); }}
         .nri-val {{ font-weight: 600; }}
         #address-input:focus {{ border-bottom-color: #58bfff !important; outline: none; }}
+        /* ── MOBILE FAB + BOTTOM-SHEET scaffolding (hidden on desktop) ── */
+        #mobile-layers-btn, #mobile-legend-btn, #mobile-overflow-btn, #mobile-layers-sheet, #mobile-overflow-menu {{ display: none; }}
+        #mobile-layers-sheet {{
+            position: fixed; left: 0; right: 0; bottom: 0; z-index: 55;
+            background: rgba(2,6,23,0.97); border-top: 1px solid rgba(88,191,255,0.18);
+            max-height: 78vh; display: flex; flex-direction: column;
+            transform: translateY(100%); transition: transform 0.28s cubic-bezier(0.32,0.72,0,1);
+            padding-bottom: var(--safe-bottom);
+            box-shadow: 0 -12px 40px rgba(0,0,0,0.6);
+        }}
+        #mobile-layers-sheet.open {{ transform: translateY(0); }}
+        .mobile-sheet-handle {{
+            flex-shrink: 0; display: flex; justify-content: center; align-items: center;
+            padding: 10px 0 6px; cursor: grab; touch-action: none;
+        }}
+        .mobile-sheet-handle::before {{
+            content: ''; width: 44px; height: 5px; border-radius: 3px;
+            background: rgba(88,191,255,0.35);
+        }}
+        .mobile-sheet-head {{
+            flex-shrink: 0; display: flex; align-items: center; justify-content: space-between;
+            padding: 0 18px 12px; border-bottom: 1px solid rgba(88,191,255,0.12);
+        }}
+        .mobile-sheet-body {{
+            flex: 1 1 auto; overflow-y: auto; padding: 12px 14px 18px;
+            -webkit-overflow-scrolling: touch; overscroll-behavior: contain;
+        }}
+        #mobile-layers-btn, #mobile-legend-btn {{
+            position: fixed; z-index: 45; width: var(--fab-size); height: var(--fab-size);
+            border-radius: 50%; border: 1px solid rgba(88,191,255,0.35);
+            background: rgba(4,15,27,0.92); backdrop-filter: blur(6px); color: #58bfff;
+            cursor: pointer; align-items: center; justify-content: center;
+            box-shadow: 0 6px 18px rgba(0,0,0,0.5);
+        }}
+        #mobile-layers-btn {{ left: calc(14px + var(--safe-left)); bottom: calc(14px + var(--safe-bottom)); }}
+        /* Legend FAB defaults next to layers FAB so it never collides with the threat panel at bottom-right */
+        #mobile-legend-btn {{ left: calc(76px + var(--safe-left)); bottom: calc(14px + var(--safe-bottom)); }}
+        #mobile-overflow-btn {{
+            background: transparent; border: none; color: #a0acbd; cursor: pointer;
+            padding: 6px; align-items: center;
+        }}
+        #mobile-overflow-menu {{
+            position: fixed; z-index: 60; right: 12px;
+            top: calc(var(--safe-top) + 60px);
+            background: rgba(4,15,27,0.97); border: 1px solid rgba(88,191,255,0.25);
+            padding: 8px; min-width: 180px; flex-direction: column; gap: 2px;
+            box-shadow: 0 12px 36px rgba(0,0,0,0.6);
+        }}
+        #mobile-overflow-menu.open {{ display: flex; }}
+        #mobile-overflow-menu a, #mobile-overflow-menu button {{
+            display: flex; align-items: center; gap: 10px;
+            padding: 11px 12px; background: transparent; border: none; color: #dde9fb;
+            font-family: 'Inter', sans-serif; font-size: 12px; font-weight: 600;
+            letter-spacing: 1.5px; text-transform: uppercase; text-decoration: none;
+            text-align: left; cursor: pointer; min-height: 44px;
+        }}
+        #mobile-overflow-menu a:hover, #mobile-overflow-menu button:hover {{ background: rgba(88,191,255,0.08); color: #58bfff; }}
+        /* Address panel bottom-sheet drag handle — only visible on mobile */
+        #address-drag-handle {{ display: none; touch-action: none; }}
+
+        /* ── 1100px: narrow desktop / iPad landscape ── */
         @media (max-width: 1100px) {{
-            nav.sidebar {{ width: 200px !important; }}
-            #stat-cards-wrap {{ left: 216px !important; }}
-            #legend-wrap {{ left: 216px !important; }}
+            nav.sidebar {{ width: 208px !important; }}
+            #stat-cards-wrap {{ left: 220px !important; }}
+            #legend-wrap {{ left: 220px !important; }}
         }}
-        @media (max-width: 768px) {{
-            nav.sidebar {{ display: none; }}
-            #stat-cards-wrap {{ left: 16px !important; width: calc(100vw - 32px) !important; }}
-            #address-panel {{ width: calc(100vw - 32px) !important; right: 16px !important; bottom: auto !important; top: 70px !important; }}
+
+        /* ── 900px: iPad portrait / large phones — sidebar still visible as drawer; stats become scroll strip ── */
+        @media (max-width: 900px) {{
+            nav.sidebar {{
+                transform: translateX(-100%); transition: transform 0.28s cubic-bezier(0.32,0.72,0,1);
+                width: 260px !important; z-index: 56 !important;
+                padding-top: var(--safe-top); box-shadow: 4px 0 24px rgba(0,0,0,0.5);
+            }}
+            nav.sidebar.mobile-open {{ transform: translateX(0); }}
+            #sidebar-close-btn {{ display: flex !important; }}
+            #mobile-layers-btn {{ display: flex; }}
+            #stat-cards-wrap {{
+                left: calc(10px + var(--safe-left)) !important;
+                right: calc(10px + var(--safe-right)) !important;
+                top: calc(var(--safe-top) + 64px) !important;
+                width: auto !important; max-width: none !important;
+            }}
             #legend-wrap {{ display: none !important; }}
+            #mobile-legend-btn {{ display: flex; }}
+            /* Header: hide nav links, theme + shortcuts — show overflow button instead */
+            header.fixed nav, #theme-btn, header.fixed button[onclick*="openShortcuts"] {{ display: none !important; }}
+            header.fixed > div[style*="width:1px"] {{ display: none !important; }}
+            #mobile-overflow-btn {{ display: flex !important; }}
+            /* Sitrep modal: stack columns, tighten padding */
+            #sitrep-overlay > div {{ max-width: 100% !important; max-height: calc(100vh - 32px); }}
+            #sitrep-overlay .flex.flex-col.md\\:flex-row {{ flex-direction: column !important; }}
+            #sitrep-overlay [style*="width:320px"] {{ width: auto !important; padding: 20px !important; border-left: none !important; border-top: 1px solid rgba(61,73,87,0.2) !important; }}
+            #location-prompt {{ white-space: normal !important; flex-wrap: wrap !important; max-width: calc(100vw - 32px); text-align: center; justify-content: center; }}
         }}
+
+        /* ── 640px: phones — threat panel becomes bottom sheet; header compressed ── */
+        @media (max-width: 640px) {{
+            header.fixed {{
+                left: calc(8px + var(--safe-left)) !important; right: calc(8px + var(--safe-right)) !important;
+                top: calc(var(--safe-top) + 6px) !important;
+                transform: none !important; width: auto !important;
+                padding: 8px 12px !important; gap: 10px !important;
+                margin-top: 0 !important;
+            }}
+            header.fixed h1 {{ font-size: 11px !important; letter-spacing: 1.5px !important; }}
+            header.fixed p#update-time {{ font-size: 8px !important; letter-spacing: 1px !important; }}
+            header.fixed #sitrep-btn {{
+                padding: 6px 10px !important; font-size: 0 !important;
+                min-width: 44px; min-height: 44px; justify-content: center;
+            }}
+            header.fixed #sitrep-btn .material-symbols-outlined {{ font-size: 20px !important; }}
+            /* Stat-cards: horizontal snap strip */
+            #stat-cards-wrap {{ top: calc(var(--safe-top) + 62px) !important; }}
+            #stat-cards-wrap #stats-body .grid {{
+                display: flex !important; overflow-x: auto; gap: 8px !important;
+                scroll-snap-type: x mandatory; -webkit-overflow-scrolling: touch;
+                padding-bottom: 4px;
+                grid-template-columns: none !important;
+            }}
+            #stat-cards-wrap #stats-body .grid > * {{
+                flex: 0 0 auto; min-width: 140px; scroll-snap-align: start;
+            }}
+            /* Address panel → bottom sheet */
+            #address-panel {{
+                left: calc(8px + var(--safe-left)) !important;
+                right: calc(8px + var(--safe-right)) !important;
+                bottom: calc(8px + var(--safe-bottom)) !important;
+                top: auto !important; width: auto !important; max-width: none !important;
+                max-height: 68vh !important; overflow: hidden !important;
+                display: flex !important; flex-direction: column !important;
+                border-radius: 14px 14px 0 0;
+            }}
+            #address-panel #address-body {{ overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; max-height: calc(68vh - 80px); }}
+            #address-drag-handle {{ display: flex !important; flex-shrink: 0; justify-content: center; padding: 8px 0 4px; cursor: grab; }}
+            #address-drag-handle::before {{ content: ''; width: 42px; height: 4px; border-radius: 2px; background: rgba(88,191,255,0.4); }}
+            #address-input {{ font-size: 16px !important; padding: 12px 10px !important; min-height: 44px; }}
+            /* Threat panel score-inputs: 1 col on narrow phones */
+            #score-inputs {{ grid-template-columns: 1fr !important; }}
+            /* Mapbox built-in controls hidden — too small/redundant on phones */
+            .mapboxgl-ctrl-top-right, .mapboxgl-ctrl-bottom-right .mapboxgl-ctrl-scale {{ display: none !important; }}
+            /* Popups centered bottom on phones */
+            #popup {{
+                position: fixed !important;
+                left: calc(12px + var(--safe-left)) !important;
+                right: calc(12px + var(--safe-right)) !important;
+                bottom: calc(78px + var(--safe-bottom)) !important;
+                top: auto !important;
+                min-width: 0 !important; max-width: none !important; width: auto !important;
+            }}
+            /* Move both FABs above the bottom-sheet threat panel */
+            #mobile-legend-btn {{ bottom: calc(80px + var(--safe-bottom)); left: calc(76px + var(--safe-left)); }}
+            #mobile-layers-btn {{ bottom: calc(80px + var(--safe-bottom)); }}
+            /* Sitrep overlay: full-screen sheet */
+            #sitrep-overlay {{ padding: 0 !important; align-items: stretch !important; }}
+            #sitrep-overlay > div {{
+                max-width: 100% !important; max-height: 100vh !important; height: 100vh;
+                border-radius: 0;
+                padding-top: var(--safe-top); padding-bottom: var(--safe-bottom);
+            }}
+            #sitrep-overlay header {{ padding: 14px 16px !important; }}
+            #sitrep-overlay .flex-1.p-8 {{ padding: 18px !important; gap: 24px !important; }}
+            #sitrep-overlay footer {{ padding: 14px 16px !important; }}
+            /* Shortcuts modal: scale to viewport */
+            #shortcuts-modal .glass-panel {{ min-width: 0 !important; max-width: calc(100vw - 24px) !important; padding: 20px 18px !important; }}
+            #location-prompt {{
+                left: calc(10px + var(--safe-left)) !important;
+                right: calc(10px + var(--safe-right)) !important;
+                transform: none !important; bottom: calc(72px + var(--safe-bottom)) !important;
+            }}
+            /* Bigger touch targets on small screens */
+            .layer-toggle {{ min-height: 40px; }}
+            .nav-btn {{ min-height: 44px; }}
+        }}
+
+        /* ── iPhone landscape: further compress ── */
+        @media (orientation: landscape) and (max-height: 500px) {{
+            header.fixed {{ padding: 4px 10px !important; gap: 6px !important; }}
+            header.fixed h1 {{ font-size: 10px !important; }}
+            header.fixed p#update-time {{ display: none !important; }}
+            #stat-cards-wrap {{ top: calc(var(--safe-top) + 44px) !important; }}
+            #address-panel {{ max-height: 92vh !important; }}
+        }}
+
+        /* ── Coarse pointer (touch devices): bigger targets, no hover tooltips ── */
+        @media (pointer: coarse) {{
+            button, .nav-btn, .layer-toggle, a[href] {{ min-height: 40px; }}
+            #hover-tooltip {{ display: none !important; }}
+            .mapboxgl-ctrl-group button {{ min-width: 40px !important; min-height: 40px !important; }}
+            /* Bigger custom range thumb */
+            input[type="range"] {{ height: 28px; }}
+            input[type="range"]::-webkit-slider-thumb {{
+                width: 24px !important; height: 24px !important;
+                -webkit-appearance: none; appearance: none;
+                background: #58bfff; border-radius: 50%; cursor: pointer;
+                box-shadow: 0 0 0 4px rgba(88,191,255,0.15);
+            }}
+            input[type="range"]::-moz-range-thumb {{
+                width: 24px; height: 24px; background: #58bfff;
+                border-radius: 50%; border: none; cursor: pointer;
+            }}
+        }}
+
+        /* ── Reduced motion: disable pulses/animations ── */
+        @media (prefers-reduced-motion: reduce) {{
+            *, *::before, *::after {{
+                animation-duration: 0.01ms !important;
+                animation-iteration-count: 1 !important;
+                transition-duration: 0.01ms !important;
+            }}
+            .live-pulse {{ animation: none !important; }}
+        }}
+
+        /* ── Scrim behind open sidebar on mobile ── */
+        #mobile-scrim {{
+            display: none; position: fixed; inset: 0; z-index: 54;
+            background: rgba(0,0,0,0.55); backdrop-filter: blur(2px);
+        }}
+        #mobile-scrim.show {{ display: block; }}
 
         /* ── 3. UTILITY CLASSES (always last — highest cascade priority) ── */
         .fixed{{position:fixed}}.absolute{{position:absolute}}.relative{{position:relative}}
@@ -2429,13 +2660,39 @@ def mapbox_map():
 <div class="fixed bottom-4 left-4 w-6 h-6 border-b-2 border-l-2 border-primary/40 z-50 pointer-events-none"></div>
 <div class="fixed bottom-4 right-4 w-6 h-6 border-b-2 border-r-2 border-primary/40 z-50 pointer-events-none"></div>
 
+<!-- Mobile scrim (behind sidebar drawer / bottom sheets) -->
+<div id="mobile-scrim" onclick="closeAllMobilePanels()"></div>
+
+<!-- Mobile FAB: open layer sidebar -->
+<button id="mobile-layers-btn" onclick="openMobileLayers()" aria-label="Open map layers" title="Layers">
+    <span class="material-symbols-outlined" style="font-size:24px;">layers</span>
+</button>
+
+<!-- Mobile FAB: legend -->
+<button id="mobile-legend-btn" onclick="openMobileLegend()" aria-label="Open legend" title="Legend">
+    <span class="material-symbols-outlined" style="font-size:22px;">palette</span>
+</button>
+
+<!-- Mobile overflow menu (replaces desktop nav links/theme/shortcuts on narrow) -->
+<div id="mobile-overflow-menu" role="menu">
+    <a href="#" onclick="event.preventDefault();showHazardOverview();closeOverflowMenu();"><span class="material-symbols-outlined" style="font-size:18px;color:#58bfff;">public</span>Global</a>
+    <a href="/analytics/"><span class="material-symbols-outlined" style="font-size:18px;color:#58bfff;">query_stats</span>Analytics</a>
+    <a href="#" onclick="event.preventDefault();startOnboarding(true);closeOverflowMenu();"><span class="material-symbols-outlined" style="font-size:18px;color:#58bfff;">tour</span>Tour</a>
+    <button onclick="toggleTheme();closeOverflowMenu();"><span class="material-symbols-outlined" style="font-size:18px;color:#58bfff;">dark_mode</span>Theme</button>
+    <button onclick="openShortcuts();closeOverflowMenu();"><span class="material-symbols-outlined" style="font-size:18px;color:#58bfff;">keyboard</span>Shortcuts</button>
+    <button onclick="locateMe();closeOverflowMenu();"><span class="material-symbols-outlined" style="font-size:18px;color:#58bfff;">my_location</span>Near Me</button>
+</div>
+
 <!-- Layers sidebar -->
 <nav class="sidebar fixed left-0 top-0 h-full z-40 flex flex-col" style="background:rgba(2,6,23,0.96);border-right:1px solid rgba(88,191,255,0.1);width:240px;">
     <div style="padding:18px 18px 14px;border-bottom:1px solid rgba(88,191,255,0.1);display:flex;align-items:center;gap:10px;flex-shrink:0;">
         <div style="width:28px;height:28px;background:rgba(88,191,255,0.15);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
             <span class="material-symbols-outlined" style="font-size:18px;color:#58bfff;">layers</span>
         </div>
-        <div style="font-size:10px;letter-spacing:2.5px;color:#58bfff;font-weight:700;font-family:'Space Grotesk',sans-serif;">MAP LAYERS</div>
+        <div style="font-size:10px;letter-spacing:2.5px;color:#58bfff;font-weight:700;font-family:'Space Grotesk',sans-serif;flex:1;">MAP LAYERS</div>
+        <button id="sidebar-close-btn" onclick="closeAllMobilePanels()" aria-label="Close" style="display:none;background:transparent;border:none;color:#a0acbd;cursor:pointer;padding:6px;line-height:1;">
+            <span class="material-symbols-outlined" style="font-size:22px;">close</span>
+        </button>
     </div>
     <div id="sidebar-layers-body" style="flex:1 1 auto;overflow-y:auto;overflow-x:hidden;padding:12px 14px 8px;display:flex;flex-direction:column;min-height:0;"></div>
     <div style="padding:10px 14px;border-top:1px solid rgba(88,191,255,0.1);flex-shrink:0;display:flex;gap:6px;">
@@ -2492,6 +2749,9 @@ def mapbox_map():
     </button>
     <button onclick="openShortcuts()" title="Keyboard shortcuts (?)" style="background:transparent;border:none;color:#64748b;cursor:pointer;padding:4px;display:flex;align-items:center;" class="hover:text-primary transition-all">
         <span class="material-symbols-outlined" style="font-size:20px;">keyboard</span>
+    </button>
+    <button id="mobile-overflow-btn" onclick="toggleOverflowMenu(event)" aria-label="Menu" title="Menu">
+        <span class="material-symbols-outlined" style="font-size:22px;">more_vert</span>
     </button>
 </header>
 
@@ -2711,6 +2971,7 @@ def mapbox_map():
 
 <!-- Location Threat Analysis Panel (bottom-right) -->
 <div id="address-panel" class="glass-panel absolute z-10 pointer-events-auto overflow-hidden" style="bottom:24px;right:24px;width:300px;max-height:calc(100vh - 280px);display:flex;flex-direction:column;">
+    <div id="address-drag-handle" onclick="toggleAddressPanel()" title="Drag or tap to expand / collapse"></div>
     <div onclick="toggleAddressPanel()" style="background:rgba(0,0,0,0.3);padding:10px 16px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid rgba(61,73,87,0.3);flex-shrink:0;cursor:pointer;" title="Collapse / expand">
         <div style="display:flex;align-items:center;gap:8px;">
             <span class="material-symbols-outlined text-primary" style="font-size:14px;font-variation-settings:'FILL' 1;">security</span>
@@ -2838,12 +3099,137 @@ function focusThreatPanel() {{
     document.getElementById('address-input').focus();
 }}
 function toggleLayerPanel() {{
-    // Layers now live in the persistent left sidebar. Flash the sidebar to draw attention.
+    // Layers now live in the persistent left sidebar. On mobile, open the drawer instead.
+    if (window.matchMedia('(max-width: 900px)').matches) {{
+        openMobileLayers();
+        return;
+    }}
     const p = document.querySelector('nav.sidebar');
     if (!p) return;
     p.style.boxShadow = '4px 0 24px rgba(88,191,255,0.35)';
     setTimeout(() => {{ p.style.boxShadow = ''; }}, 900);
 }}
+
+// ── MOBILE PANEL CONTROLS ───────────────────────────────────
+const _isMobile = () => window.matchMedia('(max-width: 900px)').matches;
+const _isCoarse = () => window.matchMedia('(pointer: coarse)').matches;
+function openMobileLayers() {{
+    const sidebar = document.querySelector('nav.sidebar');
+    const scrim = document.getElementById('mobile-scrim');
+    if (sidebar) sidebar.classList.add('mobile-open');
+    if (scrim) scrim.classList.add('show');
+    document.body.style.overflow = 'hidden';
+}}
+function openMobileLegend() {{
+    // Reuse the legend panel — on mobile we pop it up centered.
+    const wrap = document.getElementById('legend-wrap');
+    const legend = document.getElementById('legend');
+    if (!wrap || !legend) return;
+    wrap.style.display = 'block';
+    wrap.style.position = 'fixed';
+    wrap.style.left = 'calc(12px + var(--safe-left))';
+    wrap.style.right = 'calc(12px + var(--safe-right))';
+    wrap.style.bottom = 'calc(140px + var(--safe-bottom))';
+    wrap.style.top = 'auto';
+    wrap.style.zIndex = '58';
+    wrap.style.maxHeight = '55vh';
+    wrap.style.overflowY = 'auto';
+    legend.style.display = 'grid';
+    legend.style.gridTemplateColumns = '1fr 1fr';
+    legend.classList.remove('collapsed');
+    const scrim = document.getElementById('mobile-scrim');
+    if (scrim) scrim.classList.add('show');
+}}
+function closeMobileLegend() {{
+    const wrap = document.getElementById('legend-wrap');
+    if (!wrap) return;
+    wrap.style.display = '';
+    wrap.style.position = '';
+    wrap.style.left = '';
+    wrap.style.right = '';
+    wrap.style.bottom = '';
+    wrap.style.top = '';
+    wrap.style.zIndex = '';
+    wrap.style.maxHeight = '';
+    wrap.style.overflowY = '';
+}}
+function closeAllMobilePanels() {{
+    const sidebar = document.querySelector('nav.sidebar');
+    const scrim = document.getElementById('mobile-scrim');
+    if (sidebar) sidebar.classList.remove('mobile-open');
+    if (scrim) scrim.classList.remove('show');
+    closeMobileLegend();
+    closeOverflowMenu();
+    document.body.style.overflow = '';
+}}
+function toggleOverflowMenu(e) {{
+    if (e) e.stopPropagation();
+    const menu = document.getElementById('mobile-overflow-menu');
+    if (!menu) return;
+    menu.classList.toggle('open');
+}}
+function closeOverflowMenu() {{
+    const menu = document.getElementById('mobile-overflow-menu');
+    if (menu) menu.classList.remove('open');
+}}
+document.addEventListener('click', (e) => {{
+    const menu = document.getElementById('mobile-overflow-menu');
+    const btn = document.getElementById('mobile-overflow-btn');
+    if (!menu || !menu.classList.contains('open')) return;
+    if (menu.contains(e.target) || (btn && btn.contains(e.target))) return;
+    closeOverflowMenu();
+}});
+// ── Address-panel drag-to-expand on mobile ─────────────────
+(function setupAddressDrag() {{
+    const handle = document.getElementById('address-drag-handle');
+    const panel = document.getElementById('address-panel');
+    const body  = document.getElementById('address-body');
+    if (!handle || !panel || !body) return;
+    let startY = 0, startH = 0, dragging = false;
+    const getH = () => parseFloat(getComputedStyle(panel).maxHeight) || panel.offsetHeight;
+    handle.addEventListener('pointerdown', (e) => {{
+        if (!_isMobile()) return;
+        dragging = true; startY = e.clientY; startH = panel.offsetHeight;
+        handle.setPointerCapture?.(e.pointerId);
+        panel.style.transition = 'none';
+    }});
+    handle.addEventListener('pointermove', (e) => {{
+        if (!dragging) return;
+        const dy = startY - e.clientY;
+        const newH = Math.min(window.innerHeight * 0.92, Math.max(80, startH + dy));
+        panel.style.maxHeight = newH + 'px';
+    }});
+    const stop = (e) => {{
+        if (!dragging) return;
+        dragging = false;
+        panel.style.transition = '';
+        // Snap: if collapsed below 120px, collapse body; else show
+        if (panel.offsetHeight < 120) {{
+            if (body.style.display !== 'none') toggleAddressPanel();
+            panel.style.maxHeight = '';
+        }}
+    }};
+    handle.addEventListener('pointerup', stop);
+    handle.addEventListener('pointercancel', stop);
+}})();
+// ── Tap-based popup close on coarse pointers ───────────────
+(function wireMapTouch() {{
+    if (!_isCoarse()) return;
+    // Tapping the map outside a feature closes open popups.
+    document.addEventListener('DOMContentLoaded', () => {{
+        if (typeof map === 'undefined' || !map.on) return;
+        map.on('click', (e) => {{
+            // If the click wasn't on an interactive layer, close the popup.
+            const popup = document.getElementById('popup');
+            const features = map.queryRenderedFeatures(e.point);
+            if (!features.length && popup) popup.style.display = 'none';
+        }});
+    }});
+}})();
+// ── Escape closes mobile panels ────────────────────────────
+document.addEventListener('keydown', (e) => {{
+    if (e.key === 'Escape') closeAllMobilePanels();
+}});
 function showHazardOverview() {{
     const wrap = document.getElementById('stat-cards-wrap');
     if (wrap) wrap.style.display = 'block';
@@ -2904,6 +3290,12 @@ function showPopup(title, rows, e) {{
     }}
     document.getElementById('popup-content').innerHTML = html;
     popup.style.display = 'block';
+    // On phones (≤640px) CSS pins the popup to the bottom as a sheet — don't set coords.
+    if (window.matchMedia('(max-width: 640px)').matches) {{
+        popup.style.left = '';
+        popup.style.top = '';
+        return;
+    }}
     const x = e.point.x + 14;
     const y = e.point.y - 10;
     popup.style.left = Math.min(x, window.innerWidth - 300) + 'px';
