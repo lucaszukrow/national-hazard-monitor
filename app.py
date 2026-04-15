@@ -2185,6 +2185,21 @@ def mapbox_map():
             transition: color 0.15s; white-space: nowrap;
             overflow: hidden; text-overflow: ellipsis;
         }}
+        @keyframes layer-dot-spin {{
+            0%   {{ transform: rotate(0deg); }}
+            100% {{ transform: rotate(360deg); }}
+        }}
+        .layer-toggle-dot.loading {{
+            background: transparent !important;
+            border-color: rgba(88,191,255,0.35) !important;
+            border-top-color: #58bfff !important;
+            animation: layer-dot-spin 0.7s linear infinite;
+        }}
+        .layer-toggle-count.empty {{
+            background: rgba(255,255,255,0.04);
+            color: rgba(255,255,255,0.35) !important;
+            font-style: italic;
+        }}
         body.light .layer-group-header {{ color: #0080cc; border-color: rgba(88,191,255,0.25); }}
         body.light .layer-toggle-label {{ color: rgba(30,40,55,0.55); }}
         body.light .layer-toggle:hover {{ background: rgba(88,191,255,0.15); }}
@@ -3409,6 +3424,33 @@ function setupLayers() {{
         }}
     }}, 60000);
 
+    // ── SHARED SOURCE CACHE ───────────────────────────────────────────────────────
+    // All GeoJSON sources ship hidden (visibility:'none'), and Mapbox defers URL
+    // fetches for hidden-only sources. Kick off explicit fetches in parallel so
+    // data is already cached by the time the user toggles a layer on.
+    window._srcPromises = window._srcPromises || {{}};
+    window._srcData = window._srcData || {{}};
+    function fetchSource(srcName, force) {{
+        if (!force && window._srcPromises[srcName]) return window._srcPromises[srcName];
+        const p = fetch('/api/' + srcName + '?t=' + Date.now())
+            .then(r => r.json())
+            .then(d => {{
+                window._srcData[srcName] = d;
+                if (map.getSource(srcName) && map.getSource(srcName).setData) {{
+                    map.getSource(srcName).setData(d);
+                }}
+                return d;
+            }})
+            .catch(() => {{ delete window._srcPromises[srcName]; return null; }});
+        window._srcPromises[srcName] = p;
+        return p;
+    }}
+    [
+        'warnings','spc','earthquakes','fires','counties','lightning',
+        'fire_perimeters','storms','fema_disasters','river_gauges',
+        'volcanoes','drought','shelters','air_quality'
+    ].forEach(src => fetchSource(src));
+
     // ── LAYER TOGGLE BUTTONS (rendered into left sidebar) ─────────────────────────
     const sidebarBody = document.getElementById('sidebar-layers-body');
     if (sidebarBody) sidebarBody.innerHTML = '';
@@ -3452,41 +3494,80 @@ function setupLayers() {{
         const ids = Array.isArray(layerId) ? layerId : [layerId];
         let on = defaultOn;
         let count = null;  // null = unknown, number = feature count
+        let loading = false;
         const render = () => {{
             let countTxt = '';
-            if (count !== null) {{
-                countTxt = `<span class="layer-toggle-count" style="color:${{count > 0 ? '#58bfff' : 'rgba(255,255,255,0.25)'}};">${{count}}</span>`;
+            if (loading) {{
+                countTxt = `<span class="layer-toggle-count" style="color:rgba(88,191,255,0.6);">···</span>`;
+            }} else if (count !== null) {{
+                const isEmpty = count === 0;
+                const cls = isEmpty ? 'layer-toggle-count empty' : 'layer-toggle-count';
+                const txt = isEmpty ? 'empty' : count;
+                countTxt = `<span class="${{cls}}" style="color:${{isEmpty ? 'rgba(255,255,255,0.35)' : '#58bfff'}};">${{txt}}</span>`;
             }}
+            const dotCls = loading ? 'layer-toggle-dot loading' : 'layer-toggle-dot';
+            const dotStyle = loading
+                ? ''
+                : `style="background:${{on ? '#58bfff' : 'transparent'}};border-color:${{on ? '#58bfff' : 'rgba(255,255,255,0.25)'}};"`;
             btn.innerHTML = `
-                <span class="layer-toggle-dot" style="background:${{on ? '#58bfff' : 'transparent'}};border-color:${{on ? '#58bfff' : 'rgba(255,255,255,0.25)'}};"></span>
+                <span class="${{dotCls}}" ${{dotStyle}}></span>
                 <span class="layer-toggle-label" style="color:${{on ? '#dde9fb' : 'rgba(255,255,255,0.45)'}};">${{label}}</span>
                 ${{countTxt}}
             `;
         }};
         render();
+
+        // Seed count from cache/pending promise so the badge populates on page load,
+        // even before the user clicks.
+        (function seedCount() {{
+            let srcName = null;
+            for (const id of ids) {{
+                const s = map.getLayer(id)?.source;
+                if (s && map.getSource(s) && map.getSource(s).setData) {{ srcName = s; break; }}
+            }}
+            if (!srcName) return;
+            if (window._srcData[srcName]) {{
+                const d = window._srcData[srcName];
+                count = (d && d.features) ? d.features.length : 0;
+                render();
+            }} else if (window._srcPromises[srcName]) {{
+                window._srcPromises[srcName].then(d => {{
+                    count = (d && d.features) ? d.features.length : 0;
+                    render();
+                }});
+            }}
+        }})();
+
         btn.onclick = () => {{
             on = !on;
-            const refreshed = new Set();
             ids.forEach(id => {{
                 if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', on ? 'visible' : 'none');
-                if (on && _searchContext === null) {{
-                    try {{
-                        const srcName = map.getLayer(id)?.source;
-                        if (srcName && !refreshed.has(srcName) && map.getSource(srcName)?.setData) {{
-                            refreshed.add(srcName);
-                            fetch('/api/' + srcName + '?t=' + Date.now())
-                                .then(r => r.json())
-                                .then(d => {{
-                                    if (map.getSource(srcName)) map.getSource(srcName).setData(d);
-                                    count = (d && d.features) ? d.features.length : 0;
-                                    render();
-                                }})
-                                .catch(() => {{ count = 0; render(); }});
-                        }}
-                    }} catch(e) {{}}
-                }}
             }});
-            render();
+            if (!on) {{ render(); return; }}
+
+            // Determine source to refresh (first one; all ids in a toggle share a source).
+            let srcName = null;
+            for (const id of ids) {{
+                const s = map.getLayer(id)?.source;
+                if (s && map.getSource(s) && map.getSource(s).setData) {{ srcName = s; break; }}
+            }}
+            if (!srcName) {{ render(); return; }}
+
+            // If cached, use immediately; otherwise show spinner until promise resolves.
+            if (window._srcData[srcName] && _searchContext === null) {{
+                const d = window._srcData[srcName];
+                if (map.getSource(srcName)) map.getSource(srcName).setData(d);
+                count = (d && d.features) ? d.features.length : 0;
+                render();
+                return;
+            }}
+            if (_searchContext !== null) {{ render(); return; }}
+            loading = true; render();
+            fetchSource(srcName).then(d => {{
+                loading = false;
+                count = (d && d.features) ? d.features.length : 0;
+                render();
+            }}).catch(() => {{ loading = false; count = 0; render(); }});
         }};
         return btn;
     }}
@@ -3651,28 +3732,14 @@ function setupLayers() {{
 
             updateHazardChart(s);
 
-            // Stagger source refreshes 15ms apart — prevents simultaneous GPU spikes
-            // while keeping total stall to ~225ms instead of 600ms.
-            // Skip while a buffer search is active — the sources hold filtered data
-            // and refreshing would overwrite the buffer clip.
-            if (map.loaded() && _searchContext === null) {{
-                const t = Date.now();
-                const srcs = ['warnings','spc','earthquakes','fires','counties',
-                    'lightning','fire_perimeters','storms','fema_disasters',
-                    'river_gauges','volcanoes','drought','shelters','air_quality'];
-                srcs.forEach((src, i) => {{
-                    setTimeout(() => {{
-                        if (map.getSource(src)) {{
-                            // Fetch JSON objects explicitly — passing URLs to setData()
-                            // can defer for hidden layers, leaving sources empty until
-                            // the layer is toggled visible.
-                            fetch('/api/' + src + '?t=' + t)
-                                .then(r => r.json())
-                                .then(d => {{ if (map.getSource(src)) map.getSource(src).setData(d); }})
-                                .catch(() => {{}});
-                        }}
-                    }}, i * 15);
-                }});
+            // Refresh all sources in parallel via shared cache (force=true bypasses dedup).
+            // Skip while a buffer search is active — sources hold filtered data and
+            // refreshing would overwrite the buffer clip.
+            if (map.loaded() && _searchContext === null && typeof fetchSource === 'function') {{
+                ['warnings','spc','earthquakes','fires','counties','lightning',
+                 'fire_perimeters','storms','fema_disasters','river_gauges',
+                 'volcanoes','drought','shelters','air_quality']
+                    .forEach(src => fetchSource(src, true));
                 // Infrastructure intentionally NOT auto-refreshed — Overpass API
                 // takes up to 20s and the data changes rarely. Load once on first click.
             }}
