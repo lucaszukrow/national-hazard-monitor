@@ -2153,7 +2153,15 @@ def mapbox_map():
             border-bottom: 1px solid rgba(88,191,255,0.12);
             font-family: 'Space Grotesk', sans-serif;
         }}
+        .layer-group-header:hover {{ background: rgba(88,191,255,0.06); }}
         .layer-group-list {{ display: flex; flex-direction: column; gap: 1px; }}
+        .layer-toggle-count {{
+            font-size: 9px; font-weight: 700; letter-spacing: 0.5px;
+            margin-left: auto; padding: 1px 5px;
+            background: rgba(88,191,255,0.1); border-radius: 8px;
+            font-family: 'Space Grotesk', sans-serif;
+            flex-shrink: 0;
+        }}
         .layer-toggle {{
             background: transparent; border: none;
             padding: 6px 8px; cursor: pointer;
@@ -2498,6 +2506,11 @@ def mapbox_map():
 
 <!-- Stat Cards + Hazard Chart (top-left) -->
 <div id="stat-cards-wrap" class="absolute z-10 pointer-events-auto" style="left:256px;top:72px;width:370px;">
+    <div id="stats-collapse-bar" class="glass-panel" style="display:flex;align-items:center;justify-content:space-between;padding:6px 12px;margin-bottom:8px;cursor:pointer;" onclick="toggleStatsPanel()">
+        <span style="font-size:9px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#58bfff;font-family:'Space Grotesk',sans-serif;">◈ Hazard Overview</span>
+        <span id="stats-arrow" style="font-size:10px;color:#58bfff;transition:transform 0.2s;transform:rotate(180deg);">▲</span>
+    </div>
+    <div id="stats-body">
     <div class="grid grid-cols-2 gap-3">
         <div class="stat-card glass-panel p-3 relative cursor-pointer transition-all" style="border-left:3px solid rgba(255,113,108,0.7);">
             <span style="font-size:9px;color:#a0acbd;font-weight:700;letter-spacing:2px;text-transform:uppercase;">Active Warnings</span>
@@ -2553,6 +2566,7 @@ def mapbox_map():
             <div class="haz-row" data-key="volcanoes"       data-color="#FF4500">🌋 Volcano Alerts</div>
         </div>
     </div>
+    </div>
 </div>
 
 <!-- Legend (collapsible, bottom-left) -->
@@ -2600,11 +2614,14 @@ def mapbox_map():
 
 <!-- Location Threat Analysis Panel (bottom-right) -->
 <div id="address-panel" class="glass-panel absolute z-10 pointer-events-auto overflow-hidden" style="bottom:24px;right:24px;width:300px;max-height:calc(100vh - 280px);display:flex;flex-direction:column;">
-    <div style="background:rgba(0,0,0,0.3);padding:10px 16px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid rgba(61,73,87,0.3);flex-shrink:0;">
-        <h4 style="font-size:9px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#58bfff;">Threat Analysis</h4>
-        <span class="material-symbols-outlined text-primary" style="font-size:14px;font-variation-settings:'FILL' 1;">security</span>
+    <div onclick="toggleAddressPanel()" style="background:rgba(0,0,0,0.3);padding:10px 16px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid rgba(61,73,87,0.3);flex-shrink:0;cursor:pointer;" title="Collapse / expand">
+        <div style="display:flex;align-items:center;gap:8px;">
+            <span class="material-symbols-outlined text-primary" style="font-size:14px;font-variation-settings:'FILL' 1;">security</span>
+            <h4 style="font-size:9px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#58bfff;">Threat Analysis</h4>
+        </div>
+        <span id="address-arrow" style="font-size:10px;color:#58bfff;transition:transform 0.2s;transform:rotate(180deg);">▲</span>
     </div>
-    <div style="padding:16px;overflow-y:auto;flex:1;min-height:0;">
+    <div id="address-body" style="padding:16px;overflow-y:auto;flex:1;min-height:0;display:block;">
         <label style="display:block;font-size:9px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#a0acbd;margin-bottom:8px;">Search Location</label>
         <div style="position:relative;">
             <input id="address-input" type="text" placeholder="ENTER ADDRESS OR CITY" style="width:100%;background:rgba(0,0,0,0.4);border:none;border-bottom:2px solid rgba(106,118,134,0.4);color:#dde9fb;font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;padding:8px 28px 8px 0;outline:none;transition:border-color 0.2s;font-family:'Inter',sans-serif;">
@@ -2730,6 +2747,31 @@ function toggleLayerPanel() {{
     p.style.boxShadow = '4px 0 24px rgba(88,191,255,0.35)';
     setTimeout(() => {{ p.style.boxShadow = ''; }}, 900);
 }}
+function toggleStatsPanel() {{
+    const body = document.getElementById('stats-body');
+    const arrow = document.getElementById('stats-arrow');
+    if (!body || !arrow) return;
+    const nowOpen = body.style.display === 'none';
+    body.style.display = nowOpen ? 'block' : 'none';
+    arrow.style.transform = nowOpen ? 'rotate(180deg)' : 'rotate(0deg)';
+    try {{ localStorage.setItem('nhm_stats_open', nowOpen ? '1' : '0'); }} catch(e) {{}}
+}}
+function toggleAddressPanel() {{
+    const body = document.getElementById('address-body');
+    const arrow = document.getElementById('address-arrow');
+    if (!body || !arrow) return;
+    const nowOpen = body.style.display === 'none';
+    body.style.display = nowOpen ? 'block' : 'none';
+    arrow.style.transform = nowOpen ? 'rotate(180deg)' : 'rotate(0deg)';
+    try {{ localStorage.setItem('nhm_threat_open', nowOpen ? '1' : '0'); }} catch(e) {{}}
+}}
+// Restore collapse state on load
+document.addEventListener('DOMContentLoaded', () => {{
+    try {{
+        if (localStorage.getItem('nhm_stats_open') === '0') toggleStatsPanel();
+        if (localStorage.getItem('nhm_threat_open') === '0') toggleAddressPanel();
+    }} catch(e) {{}}
+}});
 function flyToWarnings() {{
     if (_latestWarnings?.features?.length) {{
         const f = _latestWarnings.features[0];
@@ -3411,10 +3453,16 @@ function setupLayers() {{
         btn.className = 'layer-toggle';
         const ids = Array.isArray(layerId) ? layerId : [layerId];
         let on = defaultOn;
+        let count = null;  // null = unknown, number = feature count
         const render = () => {{
+            let countTxt = '';
+            if (count !== null) {{
+                countTxt = `<span class="layer-toggle-count" style="color:${{count > 0 ? '#58bfff' : 'rgba(255,255,255,0.25)'}};">${{count}}</span>`;
+            }}
             btn.innerHTML = `
                 <span class="layer-toggle-dot" style="background:${{on ? '#58bfff' : 'transparent'}};border-color:${{on ? '#58bfff' : 'rgba(255,255,255,0.25)'}};"></span>
                 <span class="layer-toggle-label" style="color:${{on ? '#dde9fb' : 'rgba(255,255,255,0.45)'}};">${{label}}</span>
+                ${{countTxt}}
             `;
         }};
         render();
@@ -3430,8 +3478,12 @@ function setupLayers() {{
                             refreshed.add(srcName);
                             fetch('/api/' + srcName + '?t=' + Date.now())
                                 .then(r => r.json())
-                                .then(d => {{ if (map.getSource(srcName)) map.getSource(srcName).setData(d); }})
-                                .catch(() => {{}});
+                                .then(d => {{
+                                    if (map.getSource(srcName)) map.getSource(srcName).setData(d);
+                                    count = (d && d.features) ? d.features.length : 0;
+                                    render();
+                                }})
+                                .catch(() => {{ count = 0; render(); }});
                         }}
                     }} catch(e) {{}}
                 }}
@@ -3441,46 +3493,91 @@ function setupLayers() {{
         return btn;
     }}
 
+    // ── COLLAPSIBLE LAYER GROUPS ─────────────────────────
+    const _groupStateKey = 'nhm_group_open';
+    let _groupState = {{}};
+    try {{ _groupState = JSON.parse(localStorage.getItem(_groupStateKey) || '{{}}'); }} catch(e) {{}}
+    const saveGroupState = () => {{
+        try {{ localStorage.setItem(_groupStateKey, JSON.stringify(_groupState)); }} catch(e) {{}}
+    }};
+
     LAYER_GROUPS.forEach((group, gi) => {{
         const section = document.createElement('div');
         section.className = 'layer-group';
-        if (gi > 0) section.style.marginTop = '10px';
+        if (gi > 0) section.style.marginTop = '8px';
+
+        const isOpen = _groupState[group.name] !== undefined ? _groupState[group.name] : (gi === 0);
         const header = document.createElement('div');
         header.className = 'layer-group-header';
-        header.innerHTML = `
-            <span class="material-symbols-outlined" style="font-size:14px;color:#58bfff;">${{group.icon}}</span>
-            <span>${{group.name}}</span>
-        `;
+        header.style.cursor = 'pointer';
+        const renderHeader = (open) => {{
+            header.innerHTML = `
+                <span class="material-symbols-outlined" style="font-size:14px;color:#58bfff;">${{group.icon}}</span>
+                <span style="flex:1;">${{group.name}}</span>
+                <span class="layer-group-arrow" style="font-size:10px;transform:rotate(${{open ? 90 : 0}}deg);transition:transform 0.18s;">▶</span>
+            `;
+        }};
+        renderHeader(isOpen);
         section.appendChild(header);
+
         const list = document.createElement('div');
         list.className = 'layer-group-list';
+        list.style.display = isOpen ? 'flex' : 'none';
         group.toggles.forEach(([label, ids, def]) => list.appendChild(makeToggle(label, ids, def)));
         section.appendChild(list);
+
+        header.onclick = () => {{
+            const nowOpen = list.style.display === 'none';
+            list.style.display = nowOpen ? 'flex' : 'none';
+            renderHeader(nowOpen);
+            _groupState[group.name] = nowOpen;
+            saveGroupState();
+        }};
+
         toggleContainer.appendChild(section);
     }});
 
-    // ── BASEMAP SWITCHER ─────────────────────────────────
+    // ── BASEMAP SWITCHER (collapsible) ───────────────────
     const basemapSection = document.createElement('div');
-    basemapSection.style.cssText = 'margin-top:14px;border-top:1px solid rgba(88,191,255,0.15);padding-top:10px;';
-    basemapSection.innerHTML = `
-        <div style="font-size:9px;color:#58bfff;font-weight:700;letter-spacing:2px;margin-bottom:8px;display:flex;align-items:center;gap:6px;">
-            <span class="material-symbols-outlined" style="font-size:14px;">map</span>BASEMAP
-        </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;">
-            <button class="bm-btn active" data-style="mapbox://styles/mapbox/dark-v11">🌑 Dark</button>
-            <button class="bm-btn" data-style="mapbox://styles/mapbox/light-v11">☀️ Light</button>
-            <button class="bm-btn" data-style="mapbox://styles/mapbox/satellite-streets-v12">🛰 Satellite</button>
-            <button class="bm-btn" data-style="mapbox://styles/mapbox/streets-v12">🗺 Streets</button>
-            <button class="bm-btn" data-style="mapbox://styles/mapbox/outdoors-v12">🌲 Outdoors</button>
-            <button class="bm-btn" data-style="mapbox://styles/mapbox/navigation-night-v1">🚗 Nav Night</button>
-        </div>
+    basemapSection.className = 'layer-group';
+    basemapSection.style.cssText = 'margin-top:12px;border-top:1px solid rgba(88,191,255,0.15);padding-top:10px;';
+    const bmOpen = _groupState['BASEMAP'] !== undefined ? _groupState['BASEMAP'] : false;
+    const bmHeader = document.createElement('div');
+    bmHeader.className = 'layer-group-header';
+    bmHeader.style.cursor = 'pointer';
+    const renderBmHeader = (open) => {{
+        bmHeader.innerHTML = `
+            <span class="material-symbols-outlined" style="font-size:14px;color:#58bfff;">map</span>
+            <span style="flex:1;">BASEMAP</span>
+            <span class="layer-group-arrow" style="font-size:10px;transform:rotate(${{open ? 90 : 0}}deg);transition:transform 0.18s;">▶</span>
+        `;
+    }};
+    renderBmHeader(bmOpen);
+    basemapSection.appendChild(bmHeader);
+    const bmGrid = document.createElement('div');
+    bmGrid.style.cssText = 'display:' + (bmOpen ? 'grid' : 'none') + ';grid-template-columns:1fr 1fr;gap:4px;margin-top:6px;';
+    bmGrid.innerHTML = `
+        <button class="bm-btn active" data-style="mapbox://styles/mapbox/dark-v11">🌑 Dark</button>
+        <button class="bm-btn" data-style="mapbox://styles/mapbox/light-v11">☀️ Light</button>
+        <button class="bm-btn" data-style="mapbox://styles/mapbox/satellite-streets-v12">🛰 Satellite</button>
+        <button class="bm-btn" data-style="mapbox://styles/mapbox/streets-v12">🗺 Streets</button>
+        <button class="bm-btn" data-style="mapbox://styles/mapbox/outdoors-v12">🌲 Outdoors</button>
+        <button class="bm-btn" data-style="mapbox://styles/mapbox/navigation-night-v1">🚗 Nav Night</button>
     `;
-    basemapSection.querySelectorAll('.bm-btn').forEach(btn => {{
+    basemapSection.appendChild(bmGrid);
+    bmHeader.onclick = () => {{
+        const nowOpen = bmGrid.style.display === 'none';
+        bmGrid.style.display = nowOpen ? 'grid' : 'none';
+        renderBmHeader(nowOpen);
+        _groupState['BASEMAP'] = nowOpen;
+        saveGroupState();
+    }};
+    bmGrid.querySelectorAll('.bm-btn').forEach(btn => {{
         btn.onclick = () => {{
             const styleUrl = btn.getAttribute('data-style');
             map.setStyle(styleUrl);
             map.once('style.load', setupLayers);
-            basemapSection.querySelectorAll('.bm-btn').forEach(b => b.classList.remove('active'));
+            bmGrid.querySelectorAll('.bm-btn').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
         }};
     }});
