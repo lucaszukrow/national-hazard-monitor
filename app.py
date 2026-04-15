@@ -2034,8 +2034,14 @@ def mapbox_map():
         .nri-label {{ color: rgba(160,172,189,0.8); }}
         .nri-val {{ font-weight: 600; }}
         #address-input:focus {{ border-bottom-color: #58bfff !important; outline: none; }}
+        @media (max-width: 1100px) {{
+            nav.sidebar {{ width: 200px !important; }}
+            #stat-cards-wrap {{ left: 216px !important; }}
+            #legend-wrap {{ left: 216px !important; }}
+        }}
         @media (max-width: 768px) {{
             nav.sidebar {{ display: none; }}
+            #stat-cards-wrap {{ left: 16px !important; width: calc(100vw - 32px) !important; }}
             #address-panel {{ width: calc(100vw - 32px) !important; right: 16px !important; bottom: auto !important; top: 70px !important; }}
             #legend-wrap {{ display: none !important; }}
         }}
@@ -2137,6 +2143,43 @@ def mapbox_map():
         .stat-delta:empty {{ display: none; }}
         .stat-delta.up   {{ color: #ff716c; }}
         .stat-delta.down {{ color: #00e676; }}
+
+        /* ── LAYER TOGGLE GROUPS ──────────────────────────── */
+        .layer-group-header {{
+            font-size: 9px; color: #58bfff; font-weight: 700;
+            letter-spacing: 2px; text-transform: uppercase;
+            padding: 4px 2px 6px; margin-bottom: 4px;
+            display: flex; align-items: center; gap: 6px;
+            border-bottom: 1px solid rgba(88,191,255,0.12);
+            font-family: 'Space Grotesk', sans-serif;
+        }}
+        .layer-group-list {{ display: flex; flex-direction: column; gap: 1px; }}
+        .layer-toggle {{
+            background: transparent; border: none;
+            padding: 6px 8px; cursor: pointer;
+            display: flex; align-items: center; gap: 10px;
+            width: 100%; text-align: left;
+            font-family: 'Inter', sans-serif;
+            border-radius: 3px;
+            transition: background 0.15s;
+        }}
+        .layer-toggle:hover {{ background: rgba(88,191,255,0.08); }}
+        .layer-toggle-dot {{
+            width: 10px; height: 10px; border-radius: 50%;
+            border: 1.5px solid rgba(255,255,255,0.25);
+            background: transparent; flex-shrink: 0;
+            transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
+        }}
+        .layer-toggle:hover .layer-toggle-dot {{ box-shadow: 0 0 6px rgba(88,191,255,0.5); }}
+        .layer-toggle-label {{
+            font-size: 11px; font-weight: 500;
+            color: rgba(255,255,255,0.45);
+            transition: color 0.15s; white-space: nowrap;
+            overflow: hidden; text-overflow: ellipsis;
+        }}
+        body.light .layer-group-header {{ color: #0080cc; border-color: rgba(88,191,255,0.25); }}
+        body.light .layer-toggle-label {{ color: rgba(30,40,55,0.55); }}
+        body.light .layer-toggle:hover {{ background: rgba(88,191,255,0.15); }}
 
         /* ── BASEMAP BUTTONS ─────────────────────────────── */
         .bm-btn {{
@@ -2288,49 +2331,19 @@ def mapbox_map():
 <div class="fixed bottom-4 left-4 w-6 h-6 border-b-2 border-l-2 border-primary/40 z-50 pointer-events-none"></div>
 <div class="fixed bottom-4 right-4 w-6 h-6 border-b-2 border-r-2 border-primary/40 z-50 pointer-events-none"></div>
 
-<!-- Sidebar nav -->
-<nav class="sidebar fixed left-0 top-0 h-full z-40 flex flex-col items-center py-8" style="background:rgba(2,6,23,0.95);border-right:1px solid rgba(88,191,255,0.1);width:80px;">
-    <div class="mb-8 flex flex-col items-center gap-2">
-        <div style="width:32px;height:32px;background:rgba(88,191,255,0.15);display:flex;align-items:center;justify-content:center;">
-            <span class="material-symbols-outlined" style="font-size:20px;color:#58bfff;">radar</span>
+<!-- Layers sidebar -->
+<nav class="sidebar fixed left-0 top-0 h-full z-40 flex flex-col" style="background:rgba(2,6,23,0.96);border-right:1px solid rgba(88,191,255,0.1);width:240px;">
+    <div style="padding:18px 18px 14px;border-bottom:1px solid rgba(88,191,255,0.1);display:flex;align-items:center;gap:10px;flex-shrink:0;">
+        <div style="width:28px;height:28px;background:rgba(88,191,255,0.15);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+            <span class="material-symbols-outlined" style="font-size:18px;color:#58bfff;">layers</span>
         </div>
+        <div style="font-size:10px;letter-spacing:2.5px;color:#58bfff;font-weight:700;font-family:'Space Grotesk',sans-serif;">MAP LAYERS</div>
     </div>
-    <div class="flex flex-col flex-1" style="gap:4px;width:100%;">
-        <!-- LAYERS — toggle the layer control panel -->
-        <button id="btn-layers" onclick="toggleLayerPanel();setSidebarActive(this)" class="nav-btn active" title="Layer controls (L)">
-            <span class="material-symbols-outlined" style="font-size:22px;">layers</span>
-            <span class="nav-label">LAYERS</span>
-        </button>
-        <!-- NEAR ME — fly to user location and highlight nearby warnings -->
-        <button id="btn-nearme" onclick="locateMe();setSidebarActive(this)" class="nav-btn" title="Show warnings near me">
-            <span class="material-symbols-outlined" style="font-size:22px;">my_location</span>
-            <span class="nav-label">NEAR ME</span>
-        </button>
-        <!-- ATMOS — preset: warnings + SPC + storms + lightning -->
-        <button id="btn-atmos" onclick="presetAtmos();setSidebarActive(this)" class="nav-btn" title="Atmospheric hazards">
-            <span class="material-symbols-outlined" style="font-size:22px;">cyclone</span>
-            <span class="nav-label">ATMOS</span>
-        </button>
-        <!-- SEISMIC — preset: earthquakes only -->
-        <button id="btn-seismic" onclick="presetSeismic();setSidebarActive(this)" class="nav-btn" title="Seismic activity">
-            <span class="material-symbols-outlined" style="font-size:22px;">tsunami</span>
-            <span class="nav-label">SEISMIC</span>
-        </button>
-        <!-- THERMAL — preset: fire detections + perimeters -->
-        <button id="btn-thermal" onclick="presetThermal();setSidebarActive(this)" class="nav-btn" title="Fire & thermal hazards">
-            <span class="material-symbols-outlined" style="font-size:22px;">local_fire_department</span>
-            <span class="nav-label">THERMAL</span>
-        </button>
-        <!-- RISK — open threat analysis panel -->
-        <button id="btn-risk" onclick="focusThreatPanel();setSidebarActive(this)" class="nav-btn" title="Threat analysis (W)">
-            <span class="material-symbols-outlined" style="font-size:22px;">crisis_alert</span>
-            <span class="nav-label">RISK</span>
-        </button>
+    <div id="sidebar-layers-body" style="flex:1 1 auto;overflow-y:auto;overflow-x:hidden;padding:12px 14px 8px;display:flex;flex-direction:column;min-height:0;"></div>
+    <div style="padding:10px 14px;border-top:1px solid rgba(88,191,255,0.1);flex-shrink:0;display:flex;gap:6px;">
+        <button onclick="locateMe()" title="Near me (N)" style="flex:1;background:rgba(88,191,255,0.08);border:1px solid rgba(88,191,255,0.25);color:#a8d8ff;font-size:9px;font-weight:700;letter-spacing:1.5px;padding:7px 4px;cursor:pointer;font-family:'Inter',sans-serif;text-transform:uppercase;">⌖ Near Me</button>
+        <button onclick="document.documentElement.requestFullscreen?.()" title="Fullscreen (F)" style="flex:1;background:transparent;border:1px solid rgba(88,191,255,0.25);color:#64748b;font-size:9px;font-weight:700;letter-spacing:1.5px;padding:7px 4px;cursor:pointer;font-family:'Inter',sans-serif;text-transform:uppercase;">⛶ Full</button>
     </div>
-    <button onclick="document.documentElement.requestFullscreen?.()" class="nav-btn mt-auto" title="Fullscreen (F)">
-        <span class="material-symbols-outlined" style="font-size:22px;">fullscreen</span>
-        <span class="nav-label">EXPAND</span>
-    </button>
 </nav>
 
 <!-- Location prompt banner -->
@@ -2484,7 +2497,7 @@ def mapbox_map():
 </div>
 
 <!-- Stat Cards + Hazard Chart (top-left) -->
-<div class="absolute z-10 pointer-events-auto" style="left:96px;top:72px;width:370px;">
+<div id="stat-cards-wrap" class="absolute z-10 pointer-events-auto" style="left:256px;top:72px;width:370px;">
     <div class="grid grid-cols-2 gap-3">
         <div class="stat-card glass-panel p-3 relative cursor-pointer transition-all" style="border-left:3px solid rgba(255,113,108,0.7);">
             <span style="font-size:9px;color:#a0acbd;font-weight:700;letter-spacing:2px;text-transform:uppercase;">Active Warnings</span>
@@ -2543,7 +2556,7 @@ def mapbox_map():
 </div>
 
 <!-- Legend (collapsible, bottom-left) -->
-<div id="legend-wrap" class="absolute z-10 pointer-events-auto" style="bottom:24px;left:96px;">
+<div id="legend-wrap" class="absolute z-10 pointer-events-auto" style="bottom:24px;left:256px;">
     <div id="legend-toggle" onclick="toggleLegend()" class="glass-panel px-4 py-2 flex items-center justify-between cursor-pointer" style="min-width:140px;gap:16px;">
         <span style="font-size:9px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#58bfff;">MAP LEGEND</span>
         <span id="legend-toggle-arrow" style="font-size:10px;display:inline-block;transform:rotate(180deg);transition:transform 0.2s;color:#58bfff;">▲</span>
@@ -2711,9 +2724,11 @@ function focusThreatPanel() {{
     document.getElementById('address-input').focus();
 }}
 function toggleLayerPanel() {{
-    const p = document.getElementById('layer-panel');
+    // Layers now live in the persistent left sidebar. Flash the sidebar to draw attention.
+    const p = document.querySelector('nav.sidebar');
     if (!p) return;
-    p.style.display = (p.style.display === 'none' || p.style.display === '') ? 'flex' : 'none';
+    p.style.boxShadow = '4px 0 24px rgba(88,191,255,0.35)';
+    setTimeout(() => {{ p.style.boxShadow = ''; }}, 900);
 }}
 function flyToWarnings() {{
     if (_latestWarnings?.features?.length) {{
@@ -3354,75 +3369,60 @@ function setupLayers() {{
         }}
     }}, 60000);
 
-    // ── LAYER TOGGLE BUTTONS ─────────────────────────
-    const toggleContainer = document.createElement('div');
-    toggleContainer.id = 'layer-panel';
-    toggleContainer.style.cssText = `
-        position: absolute; top: 80px; right: 24px; z-index: 10;
-        display: flex; flex-direction: column; gap: 4px;
-        background: rgba(21,39,57,0.6);
-        border: 1px solid rgba(88,191,255,0.1);
-        padding: 12px 14px;
-        backdrop-filter: blur(20px);
-        box-shadow: 0 4px 24px rgba(0,0,0,0.4);
-        min-width: 180px;
-    `;
+    // ── LAYER TOGGLE BUTTONS (rendered into left sidebar) ─────────────────────────
+    const sidebarBody = document.getElementById('sidebar-layers-body');
+    if (sidebarBody) sidebarBody.innerHTML = '';
+    const toggleContainer = sidebarBody || document.body;
+    // Backward-compat id so legacy references don't break
+    if (sidebarBody) sidebarBody.id = 'sidebar-layers-body';
 
-    // Collapsible layer list
-    let _layersOpen = false;
-    const toggleList = document.createElement('div');
-    toggleList.style.cssText = `
-        display: none; flex-direction: column; gap: 5px;
-        max-height: calc(100vh - 520px);
-        overflow-y: auto;
-        scrollbar-width: thin;
-        scrollbar-color: rgba(0,180,255,0.3) transparent;
-        margin-top: 6px;
-    `;
-
-    const toggleHeader = document.createElement('div');
-    toggleHeader.style.cssText = `
-        font-size: 9px; color: #58bfff; font-weight: 700;
-        letter-spacing: 2px; text-transform: uppercase;
-        padding-bottom: 8px; margin-bottom: 4px; cursor: pointer;
-        display: flex; justify-content: space-between; align-items: center;
-        border-bottom: 1px solid rgba(88,191,255,0.15); user-select: none;
-    `;
-    const layerArrow = document.createElement('span');
-    layerArrow.textContent = '▶';
-    layerArrow.style.cssText = 'font-size: 8px; transition: transform 0.2s;';
-    toggleHeader.appendChild(document.createTextNode('ACTIVE LAYERS'));
-    toggleHeader.appendChild(layerArrow);
-    toggleHeader.onclick = () => {{
-        _layersOpen = !_layersOpen;
-        toggleList.style.display = _layersOpen ? 'flex' : 'none';
-        layerArrow.style.transform = _layersOpen ? 'rotate(90deg)' : '';
-    }};
-    toggleContainer.appendChild(toggleHeader);
-    toggleContainer.appendChild(toggleList);
+    // Layer categories with their toggles
+    const LAYER_GROUPS = [
+        {{ name: 'WEATHER', icon: 'cyclone', toggles: [
+            ['⚠ Active Warnings', ['warnings-fill','warnings-outline'], true],
+            ['⛈ SPC Outlook', ['spc-fill','spc-outline'], false],
+            ['⚡ Storm Reports', 'lightning-strikes', false],
+            ['🌀 Hurricanes', ['storm-cone','storm-cone-outline','storm-track'], false],
+            ['📡 NEXRAD Radar', 'nexrad-layer', false],
+            ['🛰 GOES Infrared', 'goes-ir-layer', false],
+        ]}},
+        {{ name: 'FIRE & SEISMIC', icon: 'local_fire_department', toggles: [
+            ['🔥 Fire Detections', 'fire-points', false],
+            ['🔥 Fire Perimeters', ['fire-perimeter-fill','fire-perimeter-outline'], false],
+            ['🔴 Earthquakes', 'eq-circles', false],
+            ['🌋 Volcanoes', 'volcano-circles', false],
+        ]}},
+        {{ name: 'WATER & AIR', icon: 'water_drop', toggles: [
+            ['🌊 Flood Gauges', 'river-gauges', false],
+            ['💨 Air Quality', 'aqi-circles', false],
+            ['🏜 Drought', 'drought-fill', false],
+        ]}},
+        {{ name: 'RESPONSE', icon: 'shield', toggles: [
+            ['🗺 Affected Counties', ['counties-fill','counties-outline'], false],
+            ['🏥 Hospitals', 'infra-normal', false],
+            ['⚠ At-Risk Infra', 'infra-at-risk', false],
+            ['🏠 Shelters', 'shelter-circles', false],
+            ['🏛 FEMA Disasters', 'fema-disasters', false],
+        ]}},
+    ];
 
     function makeToggle(label, layerId, defaultOn) {{
         const btn = document.createElement('button');
-        const dot = defaultOn ? '🟢' : '⚫';
-        btn.textContent = dot + ' ' + label;
-        btn.style.cssText = `
-            background: transparent;
-            color: rgba(255,255,255,${{defaultOn ? '0.85' : '0.4'}});
-            border: none; border-radius: 5px; padding: 5px 6px;
-            cursor: pointer; font-size: 11px; text-align: left;
-            width: 100%; transition: color 0.2s, background 0.2s;
-            font-family: 'Inter', Arial, sans-serif;
-        `;
-        btn.onmouseenter = () => {{ btn.style.background = 'rgba(255,255,255,0.05)'; }};
-        btn.onmouseleave = () => {{ btn.style.background = 'transparent'; }};
-        let on = defaultOn;
+        btn.className = 'layer-toggle';
         const ids = Array.isArray(layerId) ? layerId : [layerId];
+        let on = defaultOn;
+        const render = () => {{
+            btn.innerHTML = `
+                <span class="layer-toggle-dot" style="background:${{on ? '#58bfff' : 'transparent'}};border-color:${{on ? '#58bfff' : 'rgba(255,255,255,0.25)'}};"></span>
+                <span class="layer-toggle-label" style="color:${{on ? '#dde9fb' : 'rgba(255,255,255,0.45)'}};">${{label}}</span>
+            `;
+        }};
+        render();
         btn.onclick = () => {{
             on = !on;
             const refreshed = new Set();
             ids.forEach(id => {{
-                map.setLayoutProperty(id, 'visibility', on ? 'visible' : 'none');
-                // When toggling ON without an active search, ensure source has data
+                if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', on ? 'visible' : 'none');
                 if (on && _searchContext === null) {{
                     try {{
                         const srcName = map.getLayer(id)?.source;
@@ -3436,35 +3436,36 @@ function setupLayers() {{
                     }} catch(e) {{}}
                 }}
             }});
-            btn.textContent = (on ? '🟢' : '⚫') + ' ' + label;
-            btn.style.color = on ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.4)';
+            render();
         }};
         return btn;
     }}
 
-    toggleList.appendChild(makeToggle('⚠ Active Warnings', ['warnings-fill','warnings-outline'], true));
-    toggleList.appendChild(makeToggle('⛈ SPC Outlook', ['spc-fill','spc-outline'], false));
-    toggleList.appendChild(makeToggle('🔴 Earthquakes', 'eq-circles', false));
-    toggleList.appendChild(makeToggle('🔥 Fire Detections', 'fire-points', false));
-    toggleList.appendChild(makeToggle('🔥 Fire Perimeters', ['fire-perimeter-fill','fire-perimeter-outline'], false));
-    toggleList.appendChild(makeToggle('⚡ Storm Reports', 'lightning-strikes', false));
-    toggleList.appendChild(makeToggle('🌀 Hurricanes', ['storm-cone','storm-cone-outline','storm-track'], false));
-    toggleList.appendChild(makeToggle('📡 NEXRAD Radar', 'nexrad-layer', false));
-    toggleList.appendChild(makeToggle('🛰 GOES Infrared', 'goes-ir-layer', false));
-    toggleList.appendChild(makeToggle('🗺 Affected Counties', ['counties-fill','counties-outline'], false));
-    toggleList.appendChild(makeToggle('🏥 Hospitals', 'infra-normal', false));
-    toggleList.appendChild(makeToggle('⚠ At-Risk Infra', 'infra-at-risk', false));
-    toggleList.appendChild(makeToggle('💨 Air Quality', 'aqi-circles', false));
-    toggleList.appendChild(makeToggle('🌊 Flood Gauges', 'river-gauges', false));
-    toggleList.appendChild(makeToggle('🌋 Volcanoes', 'volcano-circles', false));
-    toggleList.appendChild(makeToggle('🏠 Shelters', 'shelter-circles', false));
-    toggleList.appendChild(makeToggle('🏜 Drought', 'drought-fill', false));
-    toggleList.appendChild(makeToggle('🏛 FEMA Disasters', 'fema-disasters', false));
+    LAYER_GROUPS.forEach((group, gi) => {{
+        const section = document.createElement('div');
+        section.className = 'layer-group';
+        if (gi > 0) section.style.marginTop = '10px';
+        const header = document.createElement('div');
+        header.className = 'layer-group-header';
+        header.innerHTML = `
+            <span class="material-symbols-outlined" style="font-size:14px;color:#58bfff;">${{group.icon}}</span>
+            <span>${{group.name}}</span>
+        `;
+        section.appendChild(header);
+        const list = document.createElement('div');
+        list.className = 'layer-group-list';
+        group.toggles.forEach(([label, ids, def]) => list.appendChild(makeToggle(label, ids, def)));
+        section.appendChild(list);
+        toggleContainer.appendChild(section);
+    }});
+
     // ── BASEMAP SWITCHER ─────────────────────────────────
     const basemapSection = document.createElement('div');
-    basemapSection.style.cssText = 'margin-top:10px;border-top:1px solid rgba(88,191,255,0.15);padding-top:8px;';
+    basemapSection.style.cssText = 'margin-top:14px;border-top:1px solid rgba(88,191,255,0.15);padding-top:10px;';
     basemapSection.innerHTML = `
-        <div style="font-size:9px;color:#58bfff;font-weight:700;letter-spacing:2px;margin-bottom:6px;">BASEMAP</div>
+        <div style="font-size:9px;color:#58bfff;font-weight:700;letter-spacing:2px;margin-bottom:8px;display:flex;align-items:center;gap:6px;">
+            <span class="material-symbols-outlined" style="font-size:14px;">map</span>BASEMAP
+        </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;">
             <button class="bm-btn active" data-style="mapbox://styles/mapbox/dark-v11">🌑 Dark</button>
             <button class="bm-btn" data-style="mapbox://styles/mapbox/light-v11">☀️ Light</button>
@@ -3484,7 +3485,6 @@ function setupLayers() {{
         }};
     }});
     toggleContainer.appendChild(basemapSection);
-    document.body.appendChild(toggleContainer);
 
     // ── LOAD STATS WITH RETRY ────────────────────────
     // Global hazard data for stat card fly-to
@@ -3672,19 +3672,9 @@ map.on('load', function() {{
     setupLayers();
 }});
 
-// ── LAYER PANEL COLLAPSE (for search mode) ───────
-let _layerPanelHiddenForSearch = false;
-function collapseLayerPanelForSearch() {{
-    const p = document.getElementById('layer-panel');
-    if (p) {{ _layerPanelHiddenForSearch = true; p.style.display = 'none'; }}
-}}
-function restoreLayerPanelAfterSearch() {{
-    if (_layerPanelHiddenForSearch) {{
-        const p = document.getElementById('layer-panel');
-        if (p) p.style.display = 'flex';
-        _layerPanelHiddenForSearch = false;
-    }}
-}}
+// ── LAYER PANEL COLLAPSE (no-op: layers now live in persistent sidebar) ───────
+function collapseLayerPanelForSearch() {{}}
+function restoreLayerPanelAfterSearch() {{}}
 
 // ── SITREP ────────────────────────────────────────
 let _sitrepRaw = '';
