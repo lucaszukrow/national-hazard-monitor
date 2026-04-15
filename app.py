@@ -2200,6 +2200,81 @@ def mapbox_map():
             color: rgba(255,255,255,0.35) !important;
             font-style: italic;
         }}
+        .layer-legend-caret {{
+            font-size: 9px; color: rgba(255,255,255,0.3);
+            margin-left: 4px; cursor: pointer;
+            transition: transform 0.15s, color 0.15s;
+            user-select: none; flex-shrink: 0;
+        }}
+        .layer-legend-caret:hover {{ color: #58bfff; }}
+        .layer-legend-caret.open {{ transform: rotate(180deg); color: #58bfff; }}
+        .layer-legend-row {{
+            display: none;
+            padding: 4px 8px 8px 28px;
+            font-family: 'Inter', sans-serif;
+        }}
+        .layer-legend-row.open {{ display: flex; flex-wrap: wrap; gap: 6px 10px; }}
+        .layer-legend-item {{
+            display: inline-flex; align-items: center; gap: 5px;
+            font-size: 9px; color: rgba(255,255,255,0.55);
+            white-space: nowrap;
+        }}
+        .layer-legend-swatch {{
+            width: 8px; height: 8px; border-radius: 2px;
+            border: 1px solid rgba(255,255,255,0.15); flex-shrink: 0;
+        }}
+        body.light .layer-legend-item {{ color: rgba(30,40,55,0.6); }}
+        body.light .layer-legend-swatch {{ border-color: rgba(0,0,0,0.15); }}
+
+        /* ── ONBOARDING COACH MARKS ──────────────────────── */
+        #coach-overlay {{
+            position: fixed; inset: 0; z-index: 9999;
+            background: rgba(6,11,22,0.65);
+            display: none; pointer-events: auto;
+            animation: coach-fade 0.25s ease-out;
+        }}
+        @keyframes coach-fade {{ from {{ opacity: 0; }} to {{ opacity: 1; }} }}
+        #coach-spot {{
+            position: absolute;
+            border: 2px solid #58bfff;
+            border-radius: 8px;
+            box-shadow: 0 0 0 9999px rgba(6,11,22,0.72), 0 0 24px rgba(88,191,255,0.6);
+            transition: all 0.3s cubic-bezier(0.4,0,0.2,1);
+            pointer-events: none;
+        }}
+        #coach-bubble {{
+            position: absolute;
+            max-width: 320px; width: max-content;
+            background: rgba(14,22,38,0.98);
+            border: 1px solid rgba(88,191,255,0.35);
+            border-radius: 10px;
+            padding: 16px 18px;
+            box-shadow: 0 12px 48px rgba(0,0,0,0.6), 0 0 24px rgba(88,191,255,0.15);
+            font-family: 'Inter', sans-serif;
+            transition: all 0.3s cubic-bezier(0.4,0,0.2,1);
+        }}
+        .coach-btn {{
+            background: transparent;
+            border: 1px solid rgba(88,191,255,0.4);
+            color: #58bfff;
+            padding: 6px 14px; border-radius: 4px;
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 10px; font-weight: 700; letter-spacing: 2px;
+            text-transform: uppercase; cursor: pointer;
+            transition: background 0.15s;
+        }}
+        .coach-btn:hover {{ background: rgba(88,191,255,0.12); }}
+        .coach-btn.primary {{
+            background: #58bfff; color: #06111f;
+            border-color: #58bfff;
+        }}
+        .coach-btn.primary:hover {{ background: #79cdff; }}
+        .coach-btn.skip {{
+            border-color: transparent;
+            color: rgba(255,255,255,0.5);
+            padding: 6px 8px;
+        }}
+        .coach-btn.skip:hover {{ color: rgba(255,255,255,0.8); background: transparent; }}
         body.light .layer-group-header {{ color: #0080cc; border-color: rgba(88,191,255,0.25); }}
         body.light .layer-toggle-label {{ color: rgba(30,40,55,0.55); }}
         body.light .layer-toggle:hover {{ background: rgba(88,191,255,0.15); }}
@@ -2401,9 +2476,10 @@ def mapbox_map():
     </div>
     <div style="width:1px;height:24px;background:rgba(61,73,87,0.5);"></div>
     <nav class="flex items-center gap-5">
-        <a href="#" onclick="event.preventDefault();showHazardOverview();" style="font-size:10px;font-weight:700;letter-spacing:2px;color:#58bfff;text-transform:uppercase;border-bottom:2px solid #58bfff;padding-bottom:2px;cursor:pointer;">GLOBAL</a>
+        <a id="nav-global" href="#" onclick="event.preventDefault();showHazardOverview();" style="font-size:10px;font-weight:700;letter-spacing:2px;color:#58bfff;text-transform:uppercase;border-bottom:2px solid #58bfff;padding-bottom:2px;cursor:pointer;">GLOBAL</a>
         <a href="#" style="font-size:10px;font-weight:700;letter-spacing:2px;color:#6a7686;text-transform:uppercase;">REGIONAL</a>
         <a href="/analytics/" style="font-size:10px;font-weight:700;letter-spacing:2px;color:#6a7686;text-transform:uppercase;">ANALYTICS</a>
+        <a id="nav-tour" href="#" onclick="event.preventDefault();startOnboarding(true);" style="font-size:10px;font-weight:700;letter-spacing:2px;color:#6a7686;text-transform:uppercase;cursor:pointer;" title="Replay the guided tour">TOUR</a>
     </nav>
     <div style="width:1px;height:24px;background:rgba(61,73,87,0.5);"></div>
     <button id="sitrep-btn" onclick="openSitrep()" class="flex items-center gap-2 bg-primary px-4 py-1.5 text-on-primary font-bold text-[10px] tracking-widest uppercase hover:bg-primary-dim transition-all" style="font-family:'Space Grotesk',sans-serif;">
@@ -2420,6 +2496,12 @@ def mapbox_map():
 </header>
 
 <!-- Sitrep Modal -->
+<!-- Onboarding coach mark overlay -->
+<div id="coach-overlay">
+    <div id="coach-spot"></div>
+    <div id="coach-bubble"></div>
+</div>
+
 <div id="sitrep-overlay" onclick="if(event.target===this)closeSitrep()">
     <div class="relative w-full bg-surface-variant/60 backdrop-blur-xl border border-outline-variant/20 shadow-2xl flex flex-col overflow-hidden" style="max-width:56rem;">
         <div class="corner-bracket corner-tl"></div>
@@ -3488,10 +3570,75 @@ function setupLayers() {{
         ]}},
     ];
 
+    // Inline legends keyed by primary layer id. Only layers with meaningful color
+    // vocabularies have entries — others show the toggle without a caret.
+    const LAYER_LEGENDS = {{
+        'warnings-fill': [
+            {{c:'#FF0000', l:'Tornado'}}, {{c:'#FF9900', l:'Severe T-Storm'}},
+            {{c:'#00BFFF', l:'Flash Flood'}}, {{c:'#FF6600', l:'Hurricane'}},
+            {{c:'#AAAAFF', l:'Winter'}}, {{c:'#FF4500', l:'Fire Weather'}},
+            {{c:'#FFFF00', l:'Other'}}
+        ],
+        'spc-fill': [
+            {{c:'#FF00FF', l:'High'}}, {{c:'#FF0000', l:'Moderate'}},
+            {{c:'#FF9900', l:'Enhanced'}}, {{c:'#FFFF00', l:'Slight'}},
+            {{c:'#009000', l:'Marginal'}}, {{c:'#76FF7A', l:'General TS'}}
+        ],
+        'fire-points': [
+            {{c:'#FF0000', l:'Intense (FRP >100)'}},
+            {{c:'#FF4500', l:'Active (20-100)'}},
+            {{c:'#FF8C00', l:'Detection (<20)'}}
+        ],
+        'eq-circles': [
+            {{c:'#FF0000', l:'M5+'}}, {{c:'#FF9900', l:'M4-5'}}, {{c:'#FFFF00', l:'M2.5-4'}}
+        ],
+        'aqi-circles': [
+            {{c:'#00E400', l:'Good'}}, {{c:'#FFFF00', l:'Moderate'}},
+            {{c:'#FF7E00', l:'Unhealthy (Sens.)'}}, {{c:'#FF0000', l:'Unhealthy'}},
+            {{c:'#8F3F97', l:'Very Unhealthy'}}, {{c:'#7E0023', l:'Hazardous'}}
+        ],
+        'drought-fill': [
+            {{c:'#F5DEB3', l:'D0 Abnormal'}}, {{c:'#FFD700', l:'D1 Moderate'}},
+            {{c:'#FF8C00', l:'D2 Severe'}}, {{c:'#FF2400', l:'D3 Extreme'}},
+            {{c:'#8B0000', l:'D4 Exceptional'}}
+        ],
+        'river-gauges': [
+            {{c:'#FF4444', l:'Major Flood'}}, {{c:'#FF8800', l:'Moderate'}},
+            {{c:'#FFCC00', l:'Minor'}}, {{c:'#58BFFF', l:'Action'}}
+        ],
+        'infra-normal': [
+            {{c:'#58BFFF', l:'Hospitals / Fire / Schools'}}
+        ],
+        'infra-at-risk': [
+            {{c:'#FF4444', l:'Inside warning area'}}
+        ]
+    }};
+
+    // Per-layer legend open/closed state, persisted.
+    let _legendState = {{}};
+    try {{ _legendState = JSON.parse(localStorage.getItem('nhm_legend_open') || '{{}}'); }} catch(e) {{}}
+    const saveLegendState = () => {{
+        try {{ localStorage.setItem('nhm_legend_open', JSON.stringify(_legendState)); }} catch(e) {{}}
+    }};
+
     function makeToggle(label, layerId, defaultOn) {{
+        const wrap = document.createElement('div');
+        wrap.className = 'layer-toggle-wrap';
         const btn = document.createElement('button');
         btn.className = 'layer-toggle';
         const ids = Array.isArray(layerId) ? layerId : [layerId];
+        const primaryId = ids[0];
+        const legend = LAYER_LEGENDS[primaryId] || null;
+        let legendOpen = !!_legendState[primaryId];
+
+        const legendRow = document.createElement('div');
+        legendRow.className = 'layer-legend-row' + (legendOpen ? ' open' : '');
+        if (legend) {{
+            legendRow.innerHTML = legend.map(e =>
+                `<span class="layer-legend-item"><span class="layer-legend-swatch" style="background:${{e.c}};"></span>${{e.l}}</span>`
+            ).join('');
+        }}
+
         let on = defaultOn;
         let count = null;  // null = unknown, number = feature count
         let loading = false;
@@ -3509,10 +3656,14 @@ function setupLayers() {{
             const dotStyle = loading
                 ? ''
                 : `style="background:${{on ? '#58bfff' : 'transparent'}};border-color:${{on ? '#58bfff' : 'rgba(255,255,255,0.25)'}};"`;
+            const caretHtml = legend
+                ? `<span class="layer-legend-caret${{legendOpen ? ' open' : ''}}" data-role="legend-caret" title="Toggle legend">▾</span>`
+                : '';
             btn.innerHTML = `
                 <span class="${{dotCls}}" ${{dotStyle}}></span>
                 <span class="layer-toggle-label" style="color:${{on ? '#dde9fb' : 'rgba(255,255,255,0.45)'}};">${{label}}</span>
                 ${{countTxt}}
+                ${{caretHtml}}
             `;
         }};
         render();
@@ -3538,7 +3689,18 @@ function setupLayers() {{
             }}
         }})();
 
-        btn.onclick = () => {{
+        btn.onclick = (e) => {{
+            // Caret click toggles the inline legend row, not the layer itself.
+            if (e.target && e.target.dataset && e.target.dataset.role === 'legend-caret') {{
+                e.stopPropagation();
+                legendOpen = !legendOpen;
+                _legendState[primaryId] = legendOpen;
+                saveLegendState();
+                legendRow.classList.toggle('open', legendOpen);
+                render();
+                return;
+            }}
+
             on = !on;
             ids.forEach(id => {{
                 if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', on ? 'visible' : 'none');
@@ -3569,7 +3731,9 @@ function setupLayers() {{
                 render();
             }}).catch(() => {{ loading = false; count = 0; render(); }});
         }};
-        return btn;
+        wrap.appendChild(btn);
+        if (legend) wrap.appendChild(legendRow);
+        return wrap;
     }}
 
     // ── COLLAPSIBLE LAYER GROUPS ─────────────────────────
@@ -3832,6 +3996,120 @@ function setupLayers() {{
 // Use exact Mapbox recommended pattern
 map.on('load', function() {{
     setupLayers();
+    // First-time visitor tour — 1.2s delay so layers have a chance to paint first.
+    setTimeout(() => startOnboarding(false), 1200);
+}});
+
+// ── ONBOARDING COACH MARKS ───────────────────────────────────────────────────
+const ONBOARD_STEPS = [
+    {{
+        target: '#sidebar-layers-body',
+        title: 'Toggle hazard layers',
+        text: 'Turn weather, fire, seismic, and response layers on or off. The count badge shows how many features each layer has right now, and the small caret reveals its color legend.',
+        placement: 'right'
+    }},
+    {{
+        target: '#address-panel',
+        title: 'Score any location',
+        text: "Type an address and set a radius. You'll get a real-time threat score based on active hazards nearby, plus long-term FEMA National Risk Index context.",
+        placement: 'left'
+    }},
+    {{
+        target: '#nav-global',
+        title: 'See the big picture',
+        text: 'Open the hazard overview at any time — national counts, an at-a-glance chart, and the latest update timestamp.',
+        placement: 'bottom'
+    }}
+];
+
+let _onboardIdx = 0;
+function startOnboarding(force) {{
+    if (!force) {{
+        try {{ if (localStorage.getItem('nhm_onboarded') === 'true') return; }} catch(e) {{}}
+    }}
+    _onboardIdx = 0;
+    const overlay = document.getElementById('coach-overlay');
+    if (!overlay) return;
+    overlay.style.display = 'block';
+    renderOnboardStep();
+}}
+
+function renderOnboardStep() {{
+    const overlay = document.getElementById('coach-overlay');
+    const spot    = document.getElementById('coach-spot');
+    const bubble  = document.getElementById('coach-bubble');
+    if (!overlay || !spot || !bubble) return;
+    const step = ONBOARD_STEPS[_onboardIdx];
+    const tgt = document.querySelector(step.target);
+    if (!tgt) {{
+        _onboardIdx++;
+        if (_onboardIdx < ONBOARD_STEPS.length) renderOnboardStep();
+        else endOnboarding();
+        return;
+    }}
+    const r = tgt.getBoundingClientRect();
+    spot.style.left   = (r.left - 6) + 'px';
+    spot.style.top    = (r.top - 6) + 'px';
+    spot.style.width  = (r.width + 12) + 'px';
+    spot.style.height = (r.height + 12) + 'px';
+
+    const isLast = _onboardIdx === ONBOARD_STEPS.length - 1;
+    bubble.innerHTML = `
+        <div style="font-size:9px;letter-spacing:2px;color:#58bfff;font-weight:700;margin-bottom:6px;font-family:'Space Grotesk',sans-serif;">STEP ${{_onboardIdx + 1}} / ${{ONBOARD_STEPS.length}}</div>
+        <div style="font-size:15px;font-weight:700;color:#fff;margin-bottom:8px;letter-spacing:0.3px;">${{step.title}}</div>
+        <div style="font-size:12px;color:rgba(255,255,255,0.75);line-height:1.55;margin-bottom:14px;">${{step.text}}</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
+            <button class="coach-btn skip" onclick="endOnboarding()">Skip tour</button>
+            <button class="coach-btn primary" onclick="nextOnboarding()">${{isLast ? 'Got it' : 'Next →'}}</button>
+        </div>
+    `;
+
+    // Measure bubble off-screen, then place near target within viewport.
+    bubble.style.left = '-9999px';
+    bubble.style.right = '';
+    bubble.style.top = '0';
+    requestAnimationFrame(() => {{
+        const b = bubble.getBoundingClientRect();
+        const margin = 18;
+        let top, left;
+        if (step.placement === 'right') {{
+            left = r.right + margin;
+            top  = r.top + (r.height/2) - (b.height/2);
+        }} else if (step.placement === 'left') {{
+            left = r.left - b.width - margin;
+            top  = r.top + (r.height/2) - (b.height/2);
+        }} else if (step.placement === 'bottom') {{
+            left = r.left + (r.width/2) - (b.width/2);
+            top  = r.bottom + margin;
+        }} else {{
+            left = r.left + (r.width/2) - (b.width/2);
+            top  = r.top - b.height - margin;
+        }}
+        left = Math.max(12, Math.min(left, window.innerWidth  - b.width  - 12));
+        top  = Math.max(12, Math.min(top,  window.innerHeight - b.height - 12));
+        bubble.style.left = left + 'px';
+        bubble.style.top  = top  + 'px';
+    }});
+}}
+
+function nextOnboarding() {{
+    _onboardIdx++;
+    if (_onboardIdx >= ONBOARD_STEPS.length) endOnboarding();
+    else renderOnboardStep();
+}}
+
+function endOnboarding() {{
+    const overlay = document.getElementById('coach-overlay');
+    if (overlay) overlay.style.display = 'none';
+    try {{ localStorage.setItem('nhm_onboarded', 'true'); }} catch(e) {{}}
+}}
+
+// ESC closes the tour
+document.addEventListener('keydown', (e) => {{
+    if (e.key === 'Escape') {{
+        const o = document.getElementById('coach-overlay');
+        if (o && o.style.display === 'block') endOnboarding();
+    }}
 }});
 
 // ── LAYER PANEL COLLAPSE (no-op: layers now live in persistent sidebar) ───────
