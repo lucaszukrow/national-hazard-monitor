@@ -1580,6 +1580,7 @@ def schedule_updates(interval_minutes=30):
 app = dash.Dash(
     __name__,
     title="National Hazard Monitor",
+    url_base_pathname="/analytics/",
     external_stylesheets=[
         "https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Fira+Sans:wght@300;400;500;600;700&display=swap"
     ]
@@ -1949,6 +1950,7 @@ def api_subscribe():
     print(f"  [SUBSCRIBE] {email} → {county or 'coords'} ({len(_subscriptions)} total)")
     return flask_module.jsonify({"ok": True, "message": msg})
 
+@app.server.route("/")
 @app.server.route("/mapbox")
 def mapbox_map():
     """Serves the full Mapbox GL JS map page."""
@@ -2365,7 +2367,7 @@ def mapbox_map():
     <nav class="flex items-center gap-5">
         <a href="#" style="font-size:10px;font-weight:700;letter-spacing:2px;color:#58bfff;text-transform:uppercase;border-bottom:2px solid #58bfff;padding-bottom:2px;">GLOBAL</a>
         <a href="#" style="font-size:10px;font-weight:700;letter-spacing:2px;color:#6a7686;text-transform:uppercase;">REGIONAL</a>
-        <a href="#" style="font-size:10px;font-weight:700;letter-spacing:2px;color:#6a7686;text-transform:uppercase;">ANALYTICS</a>
+        <a href="/analytics/" style="font-size:10px;font-weight:700;letter-spacing:2px;color:#6a7686;text-transform:uppercase;">ANALYTICS</a>
     </nav>
     <div style="width:1px;height:24px;background:rgba(61,73,87,0.5);"></div>
     <button id="sitrep-btn" onclick="openSitrep()" class="flex items-center gap-2 bg-primary px-4 py-1.5 text-on-primary font-bold text-[10px] tracking-widest uppercase hover:bg-primary-dim transition-all" style="font-family:'Space Grotesk',sans-serif;">
