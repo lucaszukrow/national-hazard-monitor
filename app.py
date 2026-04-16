@@ -1155,23 +1155,6 @@ def run_update():
         drought         = _results['drought']
         shelters        = _results['shelters']
 
-        # Infrastructure depends on the warning footprint, so fetch it after
-        # the parallel batch settles. If it fails or returns nothing, retain
-        # whatever we had last cycle rather than flashing an empty map.
-        try:
-            new_infra = fetch_infrastructure(warnings)
-        except Exception as e:
-            print(f"  Infrastructure fetch exception: {e}")
-            new_infra = {"type": "FeatureCollection", "features": []}
-        if new_infra.get("features"):
-            infrastructure = new_infra
-        else:
-            infrastructure = state.get("infrastructure") or new_infra
-            if not infrastructure.get("features"):
-                print("  Infrastructure: no data (empty result and no prior cache)")
-            else:
-                print(f"  Infrastructure: retaining previous {len(infrastructure['features'])} features")
-
         # Load population once
         if not state["pop_data"]:
             state["pop_data"] = fetch_population()
@@ -1199,8 +1182,10 @@ def run_update():
         # Send alerts for new high-priority events
         check_and_send_alerts(warnings, earthquakes, storms, affected)
 
-        # Update global state — lock prevents Flask handlers from reading a
-        # partially-updated state dict during the multi-key replacement.
+        # ── PHASE 1 — publish fast data immediately ──
+        # Write all the quick fetches to state NOW so endpoints start serving
+        # real data within ~30s of boot. Infrastructure (Overpass, up to 3 min)
+        # happens in Phase 2 below and updates state["infrastructure"] separately.
         with state_lock:
             state.update({
                 "last_update":     datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -1217,7 +1202,6 @@ def run_update():
                 "volcanoes":       volcanoes,
                 "drought":         drought,
                 "shelters":        shelters,
-                "infrastructure":  infrastructure,
                 "map_html":        map_html,
                 "summary": {
                     "warnings_count":   len(warnings.get("features", [])),
@@ -1233,8 +1217,8 @@ def run_update():
                     "affected_counties": affected
                 }
             })
-        print(f"  Update complete — {len(affected)} counties affected")
-        # Save to cache file so data survives restarts
+        print(f"  Phase 1 complete — fast sources published ({len(affected)} counties affected)")
+        # Save fast-path cache so restarts serve data immediately
         save_cache({
             "last_update":     state["last_update"],
             "warnings":        state["warnings"],
@@ -1254,7 +1238,46 @@ def run_update():
             "summary":         state["summary"],
             "map_html":        state["map_html"]
         })
-        print("  Cache saved")
+
+        # ── PHASE 2 — infrastructure (slow, independent) ──
+        # Fetch after state is already populated so Overpass flakiness can't
+        # starve any other endpoint. If it fails, keep whatever we had last cycle.
+        try:
+            new_infra = fetch_infrastructure(warnings)
+        except Exception as e:
+            print(f"  Infrastructure fetch exception: {e}")
+            new_infra = {"type": "FeatureCollection", "features": []}
+        if new_infra.get("features"):
+            infrastructure = new_infra
+        else:
+            infrastructure = state.get("infrastructure") or new_infra
+            if not infrastructure.get("features"):
+                print("  Infrastructure: no data (empty result and no prior cache)")
+            else:
+                print(f"  Infrastructure: retaining previous {len(infrastructure['features'])} features")
+        with state_lock:
+            state["infrastructure"] = infrastructure
+        # Re-save cache so infrastructure persists across restarts
+        save_cache({
+            "last_update":     state["last_update"],
+            "warnings":        state["warnings"],
+            "spc":             state["spc"],
+            "earthquakes":     state["earthquakes"],
+            "storms":          state["storms"],
+            "fires":           state["fires"],
+            "lightning":       state["lightning"],
+            "fire_perimeters": state["fire_perimeters"],
+            "air_quality":     state["air_quality"],
+            "fema_disasters":  state["fema_disasters"],
+            "river_gauges":    state["river_gauges"],
+            "volcanoes":       state["volcanoes"],
+            "drought":         state["drought"],
+            "shelters":        state["shelters"],
+            "infrastructure":  state["infrastructure"],
+            "summary":         state["summary"],
+            "map_html":        state["map_html"]
+        })
+        print("  Cache saved — update complete")
 
     except Exception as e:
         print(f"  ERROR during update: {e}")
