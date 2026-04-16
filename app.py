@@ -1748,47 +1748,43 @@ def api_infrastructure():
         "https://overpass.private.coffee/api/interpreter",
     ]
 
-    def fetch_one_type(entry):
-        """Fetch one infra category from Overpass, trying mirrors until one responds."""
-        tag_key, tag_val, infra_type, color, icon = entry
-        query = f'[out:json][timeout:8];node["{tag_key}"="{tag_val}"]({bbox_str});out body;'
+    for tag_key, tag_val, infra_type, color, icon in infra_types:
+        query = f'[out:json][timeout:15];node["{tag_key}"="{tag_val}"]({bbox_str});out body;'
+        items = None
         last_err = None
         for mirror in OVERPASS_MIRRORS:
             try:
-                r = requests.post(mirror, data={"data": query}, timeout=8)
+                r = requests.post(mirror, data={"data": query}, timeout=20)
                 r.raise_for_status()
                 items = r.json().get("elements", [])
-                out = []
-                for item in items[:500]:
-                    lat = item.get("lat")
-                    lon = item.get("lon")
-                    if not lat or not lon:
-                        continue
-                    at_risk = any(point_in_bbox(lon, lat, b) for b in warning_bounds)
-                    out.append({
-                        "type": "Feature",
-                        "geometry": {"type": "Point", "coordinates": [lon, lat]},
-                        "properties": {
-                            "type":    infra_type,
-                            "name":    item.get("tags", {}).get("name", infra_type.replace("_", " ").title()),
-                            "color":   color,
-                            "icon":    icon,
-                            "at_risk": at_risk
-                        }
-                    })
-                return out
+                break  # success — don't try more mirrors
             except Exception as e:
                 last_err = e
                 continue
-        print(f"  Overpass {infra_type} failed on all mirrors: {last_err}")
-        return []
-
-    # Fan out across the 4 infra types in parallel — otherwise one slow mirror
-    # serializes the others. Gevent-patched requests play nicely with threads.
-    from concurrent.futures import ThreadPoolExecutor
-    with ThreadPoolExecutor(max_workers=4) as pool:
-        for part in pool.map(fetch_one_type, infra_types):
-            features.extend(part)
+        if items is None:
+            print(f"  Overpass {infra_type} failed on all mirrors: {last_err}")
+            continue
+        try:
+            for item in items[:500]:
+                lat = item.get("lat")
+                lon = item.get("lon")
+                if not lat or not lon:
+                    continue
+                at_risk = any(point_in_bbox(lon, lat, b) for b in warning_bounds)
+                features.append({
+                    "type": "Feature",
+                    "geometry": {"type": "Point", "coordinates": [lon, lat]},
+                    "properties": {
+                        "type":    infra_type,
+                        "name":    item.get("tags", {}).get("name", infra_type.replace("_", " ").title()),
+                        "color":   color,
+                        "icon":    icon,
+                        "at_risk": at_risk
+                    }
+                })
+        except Exception as e:
+            print(f"  Overpass {infra_type} parse failed: {e}")
+            continue
 
     with state_lock:
         state["infra_cache_key"] = cache_key
