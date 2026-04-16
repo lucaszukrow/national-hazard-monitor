@@ -193,7 +193,6 @@ state = {
     "volcanoes":        {"type": "FeatureCollection", "features": []},
     "drought":          {"type": "FeatureCollection", "features": []},
     "shelters":         {"type": "FeatureCollection", "features": []},
-    "infrastructure":   {"type": "FeatureCollection", "features": []},
     # In-memory only — intentionally not cached so restarts don't suppress alerts
     # for events that are still active when the server comes back up
     "seen_alert_ids": set()
@@ -1155,23 +1154,6 @@ def run_update():
         drought         = _results['drought']
         shelters        = _results['shelters']
 
-        # Infrastructure depends on the warning footprint, so fetch it after
-        # the parallel batch settles. If it fails or returns nothing, retain
-        # whatever we had last cycle rather than flashing an empty map.
-        try:
-            new_infra = fetch_infrastructure(warnings)
-        except Exception as e:
-            print(f"  Infrastructure fetch exception: {e}")
-            new_infra = {"type": "FeatureCollection", "features": []}
-        if new_infra.get("features"):
-            infrastructure = new_infra
-        else:
-            infrastructure = state.get("infrastructure") or new_infra
-            if not infrastructure.get("features"):
-                print("  Infrastructure: no data (empty result and no prior cache)")
-            else:
-                print(f"  Infrastructure: retaining previous {len(infrastructure['features'])} features")
-
         # Load population once
         if not state["pop_data"]:
             state["pop_data"] = fetch_population()
@@ -1217,7 +1199,6 @@ def run_update():
                 "volcanoes":       volcanoes,
                 "drought":         drought,
                 "shelters":        shelters,
-                "infrastructure":  infrastructure,
                 "map_html":        map_html,
                 "summary": {
                     "warnings_count":   len(warnings.get("features", [])),
@@ -1250,7 +1231,6 @@ def run_update():
             "volcanoes":       state["volcanoes"],
             "drought":         state["drought"],
             "shelters":        state["shelters"],
-            "infrastructure":  state["infrastructure"],
             "summary":         state["summary"],
             "map_html":        state["map_html"]
         })
@@ -1722,177 +1702,100 @@ def api_counties():
     )
 
 @app.server.route("/api/infrastructure")
-def fetch_infrastructure(warnings_data):
-    """Fetch infrastructure (hospitals, fire stations, power plants, schools)
-    within active warning areas. Runs in the background update thread so the
-    Flask endpoint never blocks on Overpass, which is flaky under load.
-
-    Strategy: cluster warning bboxes into small (<2°) regional queries,
-    combine all 4 tag types into a single Overpass query per cluster,
-    and round-robin across mirrors so no one host is hammered.
-    """
-    print("Downloading infrastructure (Overpass)...")
-    warning_bounds = get_warning_bounds(warnings_data)
+def api_infrastructure():
+    """Returns infrastructure near warning areas as GeoJSON."""
+    features = []
+    warning_bounds = get_warning_bounds(state["warnings"])
+    
     if not warning_bounds:
-        return {"type": "FeatureCollection", "features": []}
+        return flask_module.Response(
+            json.dumps({"type": "FeatureCollection", "features": []}),
+            mimetype="application/json",
+            headers={"Access-Control-Allow-Origin": "*"}
+        )
 
-    clusters = _cluster_warning_bounds(warning_bounds)
+    # Build a single expanded bounding box covering all warnings
+    all_minlon = min(b["minlon"] for b in warning_bounds) - 1.0
+    all_maxlon = max(b["maxlon"] for b in warning_bounds) + 1.0
+    all_minlat = min(b["minlat"] for b in warning_bounds) - 1.0
+    all_maxlat = max(b["maxlat"] for b in warning_bounds) + 1.0
 
     infra_types = [
-        ("amenity", "hospital",     "hospital",      "#FF0066", "🏥"),
+        ("amenity", "hospital",     "hospital",     "#FF0066", "🏥"),
         ("amenity", "fire_station", "fire_station",  "#FF4400", "🚒"),
         ("power",   "plant",        "power_plant",   "#FFD700", "⚡"),
         ("amenity", "school",       "school",        "#00FF88", "🏫"),
     ]
-    tag_index = {f"{k}={v}": (t, color, icon) for (k, v, t, color, icon) in infra_types}
 
+    cache_key = f"{all_minlon:.1f},{all_minlat:.1f},{all_maxlon:.1f},{all_maxlat:.1f}"
+    with state_lock:
+        if state.get("infra_cache_key") == cache_key and state.get("infra_features"):
+            return flask_module.Response(
+                json.dumps({"type": "FeatureCollection", "features": state["infra_features"]}),
+                mimetype="application/json",
+                headers={"Access-Control-Allow-Origin": "*"}
+            )
+
+    bbox_str = f"{all_minlat},{all_minlon},{all_maxlat},{all_maxlon}"
+
+    # Public Overpass mirrors — tried in order until one succeeds. The main
+    # instance (overpass-api.de) is overloaded during peak hours and returns
+    # 504 Gateway Timeout; mirrors distribute the load and keep us up.
     OVERPASS_MIRRORS = [
+        "https://overpass-api.de/api/interpreter",
         "https://overpass.kumi.systems/api/interpreter",
         "https://lz4.overpass-api.de/api/interpreter",
-        "https://overpass-api.de/api/interpreter",
+        "https://overpass.private.coffee/api/interpreter",
     ]
 
-    def query_cluster(idx, cluster):
-        bbox_str = f"{cluster['minlat']},{cluster['minlon']},{cluster['maxlat']},{cluster['maxlon']}"
-        union = "".join(f'node["{k}"="{v}"]({bbox_str});' for (k, v, _, _, _) in infra_types)
-        query = f"[out:json][timeout:25];({union});out body;"
-        mirrors = OVERPASS_MIRRORS[idx % len(OVERPASS_MIRRORS):] + \
-                  OVERPASS_MIRRORS[:idx % len(OVERPASS_MIRRORS)]
-        for mirror in mirrors:
+    def fetch_one_type(entry):
+        """Fetch one infra category from Overpass, trying mirrors until one responds."""
+        tag_key, tag_val, infra_type, color, icon = entry
+        query = f'[out:json][timeout:8];node["{tag_key}"="{tag_val}"]({bbox_str});out body;'
+        last_err = None
+        for mirror in OVERPASS_MIRRORS:
             try:
-                r = requests.post(mirror, data={"data": query}, timeout=30)
-                if r.status_code in (429, 504):
-                    continue
+                r = requests.post(mirror, data={"data": query}, timeout=8)
                 r.raise_for_status()
+                items = r.json().get("elements", [])
                 out = []
-                for item in r.json().get("elements", [])[:2000]:
+                for item in items[:500]:
                     lat = item.get("lat")
                     lon = item.get("lon")
                     if not lat or not lon:
                         continue
-                    tags = item.get("tags", {}) or {}
-                    infra_entry = None
-                    for key, val in (("amenity", tags.get("amenity")),
-                                     ("power",   tags.get("power"))):
-                        if val and f"{key}={val}" in tag_index:
-                            infra_entry = tag_index[f"{key}={val}"]
-                            break
-                    if not infra_entry:
-                        continue
-                    infra_type, color, icon = infra_entry
                     at_risk = any(point_in_bbox(lon, lat, b) for b in warning_bounds)
                     out.append({
                         "type": "Feature",
                         "geometry": {"type": "Point", "coordinates": [lon, lat]},
                         "properties": {
                             "type":    infra_type,
-                            "name":    tags.get("name", infra_type.replace("_", " ").title()),
+                            "name":    item.get("tags", {}).get("name", infra_type.replace("_", " ").title()),
                             "color":   color,
                             "icon":    icon,
-                            "at_risk": at_risk,
+                            "at_risk": at_risk
                         }
                     })
                 return out
-            except Exception:
+            except Exception as e:
+                last_err = e
                 continue
-        return None  # all mirrors failed for this cluster
-
-    features = []
-    seen = set()
-    failed_clusters = []
-    with ThreadPoolExecutor(max_workers=len(OVERPASS_MIRRORS)) as pool:
-        futures = {pool.submit(query_cluster, i, c): (i, c) for i, c in enumerate(clusters)}
-        for fut in futures:
-            idx_cl = futures[fut]
-            try:
-                part = fut.result()
-            except Exception:
-                part = None
-            if part is None:
-                failed_clusters.append(idx_cl)
-                continue
-            for feat in part:
-                lon, lat = feat["geometry"]["coordinates"]
-                key = (feat["properties"]["type"], round(lon, 5), round(lat, 5))
-                if key in seen:
-                    continue
-                seen.add(key)
-                features.append(feat)
-
-    # One retry pass for failed clusters (serial, with fresh mirror rotation) —
-    # often enough to catch transient 504s after the initial burst subsides.
-    if failed_clusters:
-        time.sleep(2.0)
-        for idx, cluster in failed_clusters:
-            part = query_cluster(idx + len(clusters), cluster)
-            if not part:
-                continue
-            for feat in part:
-                lon, lat = feat["geometry"]["coordinates"]
-                key = (feat["properties"]["type"], round(lon, 5), round(lat, 5))
-                if key in seen:
-                    continue
-                seen.add(key)
-                features.append(feat)
-
-    print(f"  Infrastructure: {len(clusters)} clusters "
-          f"({len(clusters) - len(failed_clusters)} succeeded on first pass) "
-          f"→ {len(features)} features")
-    return {"type": "FeatureCollection", "features": features}
-
-
-def _cluster_warning_bounds(bounds, buffer=0.3, max_span=2.0):
-    """Merge overlapping warning bboxes into small regional clusters.
-
-    Overpass chokes on continent-spanning queries (it's billed per element and
-    rejects huge bboxes). Instead of one giant union, we cluster nearby warnings
-    and issue one query per cluster. Each cluster is capped at `max_span` degrees
-    so queries stay cheap.
-    """
-    if not bounds:
+        print(f"  Overpass {infra_type} failed on all mirrors: {last_err}")
         return []
-    items = [{
-        "minlon": b["minlon"] - buffer, "maxlon": b["maxlon"] + buffer,
-        "minlat": b["minlat"] - buffer, "maxlat": b["maxlat"] + buffer,
-    } for b in bounds]
 
-    changed = True
-    while changed:
-        changed = False
-        merged = []
-        for item in items:
-            hit = -1
-            for i, m in enumerate(merged):
-                overlaps = (item["maxlon"] >= m["minlon"] and item["minlon"] <= m["maxlon"]
-                            and item["maxlat"] >= m["minlat"] and item["minlat"] <= m["maxlat"])
-                if not overlaps:
-                    continue
-                new_w = max(m["maxlon"], item["maxlon"]) - min(m["minlon"], item["minlon"])
-                new_h = max(m["maxlat"], item["maxlat"]) - min(m["minlat"], item["minlat"])
-                if new_w <= max_span and new_h <= max_span:
-                    hit = i
-                    break
-            if hit >= 0:
-                m = merged[hit]
-                merged[hit] = {
-                    "minlon": min(m["minlon"], item["minlon"]),
-                    "maxlon": max(m["maxlon"], item["maxlon"]),
-                    "minlat": min(m["minlat"], item["minlat"]),
-                    "maxlat": max(m["maxlat"], item["maxlat"]),
-                }
-                changed = True
-            else:
-                merged.append(item)
-        items = merged
-    return items
+    # Fan out across the 4 infra types in parallel — otherwise one slow mirror
+    # serializes the others. Gevent-patched requests play nicely with threads.
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        for part in pool.map(fetch_one_type, infra_types):
+            features.extend(part)
 
+    with state_lock:
+        state["infra_cache_key"] = cache_key
+        state["infra_features"]  = features
 
-def api_infrastructure():
-    """Serve pre-fetched infrastructure from state. The background update thread
-    populates this every 30 minutes so the endpoint is always instant and never
-    blocks on Overpass (which is flaky under load)."""
     return flask_module.Response(
-        json.dumps(state.get("infrastructure") or {"type": "FeatureCollection", "features": []}),
+        json.dumps({"type": "FeatureCollection", "features": features}),
         mimetype="application/json",
         headers={"Access-Control-Allow-Origin": "*"}
     )
