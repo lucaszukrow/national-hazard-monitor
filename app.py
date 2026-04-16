@@ -1374,7 +1374,7 @@ def fetch_fema_disasters():
                 "$format": "json",
                 "$orderby": "declarationDate desc",
                 "$top": "300",
-                "$select": "disasterNumber,state,declarationDate,disasterType,declarationTitle,designatedArea",
+                "$select": "disasterNumber,state,declarationDate,incidentType,declarationTitle,designatedArea",
             },
             timeout=20
         )
@@ -1390,7 +1390,7 @@ def fetch_fema_disasters():
             if st not in by_state:
                 by_state[st] = {"count": 0, "types": set(), "latest": ""}
             by_state[st]["count"] += 1
-            dtype = rec.get("disasterType", "")
+            dtype = rec.get("incidentType", "")
             if dtype:
                 by_state[st]["types"].add(dtype)
             if not by_state[st]["latest"]:
@@ -1453,70 +1453,62 @@ def fetch_river_gauges():
         return {"type": "FeatureCollection", "features": []}
 
 def fetch_volcanoes():
-    """Fetch elevated volcano alerts from GDACS (Orange/Red level globally)."""
-    print("Downloading GDACS volcano alerts...")
+    """Fetch elevated US volcano alerts from USGS HANS (Yellow / Orange / Red).
+
+    The getElevatedVolcanoes endpoint returns one record per elevated volcano
+    but no coordinates — we fetch each volcano's notice detail to get lat/lng
+    plus the human-readable synopsis. HANS is authoritative for US volcanoes
+    (replaces the previous GDACS feed, which never reports VO events).
+    """
+    print("Downloading USGS HANS volcano alerts...")
     try:
         r = requests.get(
-            "https://www.gdacs.org/gdacsapi/api/events/geteventlist/MAP?eventlist=VO",
-            timeout=20
+            "https://volcanoes.usgs.gov/hans-public/api/volcano/getElevatedVolcanoes",
+            timeout=15
         )
         r.raise_for_status()
-        data = r.json()
-        alert_colors = {"orange": "#FF8800", "red": "#FF0000"}
+        elevated = r.json() or []
+        color_map = {"YELLOW": "#FFD700", "ORANGE": "#FF8800", "RED": "#FF0000"}
         features = []
-        for feat in data.get("features", []):
+        for v in elevated:
             try:
-                props = feat.get("properties") or {}
-                # GDACS API ignores eventlist=VO — must filter by eventtype client-side
-                if str(props.get("eventtype", "")).upper() != "VO":
+                notice_url = v.get("notice_data")
+                if not notice_url:
                     continue
-                alert = str(props.get("alertlevel", "")).lower()
-                # Only show elevated (orange/red) current events to avoid clutter
-                if alert not in ("orange", "red"):
+                nr = requests.get(notice_url, timeout=15)
+                nr.raise_for_status()
+                notice = nr.json() or {}
+                sections = notice.get("notice_sections") or []
+                if not sections:
                     continue
-                if not props.get("iscurrent"):
+                # Observatory notices (e.g. AVO) include sections for every elevated
+                # volcano in their region — match by vnum instead of picking [0].
+                target_vnum = str(v.get("vnum") or "")
+                s = next((sec for sec in sections if str(sec.get("vnum") or "") == target_vnum), None) or sections[0]
+                lat = s.get("lat")
+                lng = s.get("lng")
+                if lat is None or lng is None:
                     continue
-                geom = feat.get("geometry") or {}
-                coords = geom.get("coordinates")
-                if not coords:
-                    continue
-                # GDACS sometimes returns polygon geometry for uncertainty cones —
-                # use the first coordinate pair as the point location
-                if geom.get("type") == "Point":
-                    lon, lat = coords[0], coords[1]
-                elif geom.get("type") == "Polygon":
-                    # centroid approximation from first ring's first point
-                    ring = coords[0]
-                    lon = sum(p[0] for p in ring) / len(ring)
-                    lat = sum(p[1] for p in ring) / len(ring)
-                else:
-                    continue
-                name = props.get("eventname") or props.get("name") or "Volcano"
-                country = props.get("country", "")
+                color_code = (v.get("color_code") or "").upper()
+                alert_level = (v.get("alert_level") or "").upper()
                 features.append({
                     "type": "Feature",
-                    "geometry": {"type": "Point", "coordinates": [lon, lat]},
+                    "geometry": {"type": "Point", "coordinates": [float(lng), float(lat)]},
                     "properties": {
-                        "name":    name,
-                        "country": country,
-                        "alert":   alert,
-                        "color":   alert_colors.get(alert, "#FF8800"),
-                        "score":   props.get("alertscore", ""),
+                        "name":     v.get("volcano_name") or s.get("vName") or "Volcano",
+                        "alert":    alert_level.lower(),
+                        "color":    color_map.get(color_code, "#FF8800"),
+                        "region":   s.get("region", ""),
+                        "observatory": v.get("obs_fullname", ""),
+                        "synopsis": s.get("synopsis", ""),
+                        "url":      s.get("vUrl") or v.get("notice_url", ""),
                     }
                 })
-            except Exception:
+            except Exception as inner:
+                print(f"  Volcano notice fetch failed ({v.get('volcano_name')}): {inner}")
                 continue
-        # Deduplicate by rounded coordinates (GDACS sends same event as multiple polygons)
-        seen = set()
-        unique = []
-        for feat in features:
-            coords = feat["geometry"]["coordinates"]
-            key = (round(coords[0], 1), round(coords[1], 1))
-            if key not in seen:
-                seen.add(key)
-                unique.append(feat)
-        print(f"  Volcanoes: {len(unique)} elevated (Orange/Red) active alerts")
-        return {"type": "FeatureCollection", "features": unique}
+        print(f"  Volcanoes: {len(features)} elevated (Yellow/Orange/Red) US alerts")
+        return {"type": "FeatureCollection", "features": features}
     except Exception as e:
         print(f"  Volcanoes failed: {e}")
         return {"type": "FeatureCollection", "features": []}
@@ -1544,7 +1536,7 @@ def fetch_shelters():
     try:
         url = (
             "https://gis.fema.gov/arcgis/rest/services/NSS/OpenShelters/MapServer/0/query"
-            "?where=1%3D1&outFields=SHELTER_NAME,ADDRESS,CITY,STATE,PET_FRIENDLY,CAPACITY"
+            "?where=1%3D1&outFields=shelter_name,address,city,state,pet_accommodations_code,evacuation_capacity,shelter_status"
             "&geometryPrecision=3&outSR=4326&resultRecordCount=2000&f=geojson"
         )
         r = requests.get(url, timeout=20)
@@ -1745,16 +1737,34 @@ def api_infrastructure():
             )
 
     bbox_str = f"{all_minlat},{all_minlon},{all_maxlat},{all_maxlon}"
-    
+
+    # Public Overpass mirrors — tried in order until one succeeds. The main
+    # instance (overpass-api.de) is overloaded during peak hours and returns
+    # 504 Gateway Timeout; mirrors distribute the load and keep us up.
+    OVERPASS_MIRRORS = [
+        "https://overpass-api.de/api/interpreter",
+        "https://overpass.kumi.systems/api/interpreter",
+        "https://lz4.overpass-api.de/api/interpreter",
+        "https://overpass.private.coffee/api/interpreter",
+    ]
+
     for tag_key, tag_val, infra_type, color, icon in infra_types:
         query = f'[out:json][timeout:15];node["{tag_key}"="{tag_val}"]({bbox_str});out body;'
+        items = None
+        last_err = None
+        for mirror in OVERPASS_MIRRORS:
+            try:
+                r = requests.post(mirror, data={"data": query}, timeout=20)
+                r.raise_for_status()
+                items = r.json().get("elements", [])
+                break  # success — don't try more mirrors
+            except Exception as e:
+                last_err = e
+                continue
+        if items is None:
+            print(f"  Overpass {infra_type} failed on all mirrors: {last_err}")
+            continue
         try:
-            r = requests.post(
-                "https://overpass-api.de/api/interpreter",
-                data={"data": query}, timeout=20
-            )
-            r.raise_for_status()
-            items = r.json().get("elements", [])
             for item in items[:500]:
                 lat = item.get("lat")
                 lon = item.get("lon")
@@ -1773,7 +1783,7 @@ def api_infrastructure():
                     }
                 })
         except Exception as e:
-            print(f"  Overpass {infra_type} failed: {e}")
+            print(f"  Overpass {infra_type} parse failed: {e}")
             continue
 
     with state_lock:
@@ -3844,11 +3854,14 @@ function setupLayers() {{
     }});
     map.on('click', 'shelter-circles', (e) => {{
         const p = e.features[0].properties;
+        const petCode = (p.pet_accommodations_code || '').toUpperCase();
+        const petOk   = petCode && petCode !== 'NONE' && petCode !== 'UNK';
         showPopup('🏠 Emergency Shelter', {{
-            'Name':    p.SHELTER_NAME || 'Open Shelter',
-            'Address': (p.ADDRESS || '') + (p.CITY ? ', ' + p.CITY : '') + (p.STATE ? ', ' + p.STATE : ''),
-            'Pet Friendly': p.PET_FRIENDLY === 'Yes' ? '✅ Yes' : '❌ No',
-            'Capacity': p.CAPACITY || 'N/A'
+            'Name':    p.shelter_name || 'Open Shelter',
+            'Address': (p.address || '') + (p.city ? ', ' + p.city : '') + (p.state ? ', ' + p.state : ''),
+            'Status':  p.shelter_status || 'OPEN',
+            'Pet Friendly': petOk ? '✅ Yes' : '❌ No',
+            'Capacity': p.evacuation_capacity || 'N/A'
         }}, e);
     }});
     map.on('mouseenter', 'shelter-circles', () => map.getCanvas().style.cursor = 'pointer');
