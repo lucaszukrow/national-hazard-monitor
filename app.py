@@ -1721,6 +1721,7 @@ def api_counties():
         headers={"Access-Control-Allow-Origin": "*"}
     )
 
+@app.server.route("/api/infrastructure")
 def fetch_infrastructure(warnings_data):
     """Fetch infrastructure (hospitals, fire stations, power plants, schools)
     within active warning areas. Runs in the background update thread so the
@@ -1886,7 +1887,6 @@ def _cluster_warning_bounds(bounds, buffer=0.3, max_span=2.0):
     return items
 
 
-@app.server.route("/api/infrastructure")
 def api_infrastructure():
     """Serve pre-fetched infrastructure from state. The background update thread
     populates this every 30 minutes so the endpoint is always instant and never
