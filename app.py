@@ -691,7 +691,7 @@ def generate_sitrep():
     # Top 5 flood gauges by severity
     gauge_features = state.get("river_gauges", {}).get("features", [])
     top_gauges = "\n".join(
-        f"  - {f['properties'].get('gaugelid','')}: {f['properties'].get('status','')} — {f['properties'].get('waterbody','')}, {f['properties'].get('state','')}"
+        f"  - {f['properties'].get('gaugelid','')}: {f['properties'].get('status','')} — {f['properties'].get('location','')}, {f['properties'].get('state','')}"
         for f in gauge_features[:5]
     )
 
@@ -833,7 +833,7 @@ def generate_county_sitrep(lat, lng, radius_miles=50, county_name=""):
         )
     if gauge_feats:
         ctx += "\nFlood gauges:\n" + "\n".join(
-            f"  - {f.get('properties',{}).get('waterbody','')} ({f.get('properties',{}).get('status','')})"
+            f"  - {f.get('properties',{}).get('location','')} ({f.get('properties',{}).get('status','')})"
             for f in gauge_feats[:5]
         )
 
@@ -1928,7 +1928,13 @@ def api_sitrep():
             county = flask_module.request.args.get("county", default="")
         except Exception:
             lat = lng = None
-        if lat is not None and lng is not None:
+        valid_loc = (
+            lat is not None and lng is not None
+            and -90  <= lat <= 90
+            and -180 <= lng <= 180
+            and 1    <= radius <= 500
+        )
+        if valid_loc:
             text, raw = generate_county_sitrep(lat, lng, radius, county)
         else:
             text, raw = generate_sitrep()
@@ -5511,7 +5517,7 @@ function getThreatLevel(score) {{
 function distanceDecay(distMiles, radiusMiles) {{
     // Closer threats weighted more heavily
     // 0 miles = 1.5x, radius miles = 0.5x
-    return 1.5 - (distMiles / radiusMiles);
+    return Math.max(0, 1.5 - (distMiles / radiusMiles));
 }}
 
 function getProximityLabel(distMiles) {{
