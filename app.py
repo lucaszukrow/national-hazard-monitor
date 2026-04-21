@@ -390,8 +390,15 @@ def get_feature_bbox(coords):
     return {"minlon": min(lons), "maxlon": max(lons),
             "minlat": min(lats), "maxlat": max(lats)}
 
+SIG_RANK = {"W": 3, "A": 2, "Y": 1, "S": 0}   # Warning > Watch > Advisory > Statement
+
+
 def find_affected_counties(warnings_geojson, pop_data, counties_geojson):
-    """Find counties intersecting warning polygons using bbox overlap."""
+    """Find counties intersecting warning polygons using bbox overlap.
+
+    For counties under multiple overlapping warnings, keep the highest-severity
+    warning and count the total number of overlaps so the UI can badge them.
+    """
     if not counties_geojson or not warnings_geojson:
         return [], 0
 
@@ -399,14 +406,12 @@ def find_affected_counties(warnings_geojson, pop_data, counties_geojson):
     if not warning_bounds:
         return [], 0
 
-    affected = []
-    total_pop = 0
-    seen_fips = set()
+    county_hits = {}  # fips -> {"rank", "props", "feat_props", "count"}
 
     for feat in counties_geojson.get("features", []):
         try:
-            fips  = feat.get("id", "")
-            if fips in seen_fips:
+            fips   = feat.get("id", "")
+            if not fips:
                 continue
             props  = feat.get("properties", {})
             coords = feat.get("geometry", {}).get("coordinates", [])
@@ -419,26 +424,42 @@ def find_affected_counties(warnings_geojson, pop_data, counties_geojson):
 
             for bounds in warning_bounds:
                 if bboxes_overlap(county_bbox, bounds):
-                    state_code = fips[:2]
-                    pop = pop_data.get(fips, 0)
-                    total_pop += pop
-                    seen_fips.add(fips)
-                    w_props  = bounds["props"]
-                    phenom   = w_props.get("phenom", "")
-                    sig      = w_props.get("sig", "")
-                    sig_name = {"W":"Warning","A":"Watch","Y":"Advisory","S":"Statement"}.get(str(sig).strip(), str(sig))
-                    affected.append({
-                        "county":     props.get("NAME", "Unknown"),
-                        "state":      state_fips.get(state_code, state_code),
-                        "fips":       fips,
-                        "population": pop,
-                        "phenom":     phenom,
-                        "sig":        sig_name,
-                        "event":      phenom_names.get(str(phenom).strip().upper(), phenom) + " " + sig_name
-                    })
-                    break
+                    w_props = bounds["props"]
+                    rank    = SIG_RANK.get(str(w_props.get("sig", "")).strip(), 0)
+                    entry   = county_hits.get(fips)
+                    if entry is None:
+                        county_hits[fips] = {
+                            "rank": rank, "props": w_props,
+                            "feat_props": props, "count": 1
+                        }
+                    else:
+                        entry["count"] += 1
+                        if rank > entry["rank"]:
+                            entry["rank"]  = rank
+                            entry["props"] = w_props
         except Exception:
             continue
+
+    affected = []
+    total_pop = 0
+    for fips, h in county_hits.items():
+        pop = pop_data.get(fips, 0)
+        total_pop += pop
+        w        = h["props"]
+        phenom   = w.get("phenom", "")
+        sig      = w.get("sig", "")
+        sig_name = {"W":"Warning","A":"Watch","Y":"Advisory","S":"Statement"}.get(str(sig).strip(), str(sig))
+        affected.append({
+            "county":        h["feat_props"].get("NAME", "Unknown"),
+            "state":         state_fips.get(fips[:2], fips[:2]),
+            "fips":          fips,
+            "population":    pop,
+            "phenom":        phenom,
+            "sig":           sig_name,
+            "severity_rank": h["rank"],
+            "warning_count": h["count"],
+            "event":         phenom_names.get(str(phenom).strip().upper(), phenom) + " " + sig_name,
+        })
 
     return affected, total_pop
 
@@ -1686,13 +1707,15 @@ def api_counties():
             county_data = affected_fips[fips]
             feat_copy = dict(feat)
             feat_copy["properties"] = {
-                "fips":       fips,
-                "county":     county_data.get("county", ""),
-                "state":      county_data.get("state", ""),
-                "population": county_data.get("population", 0),
-                "event":      county_data.get("event", ""),
-                "sig":        county_data.get("sig", ""),
-                "phenom":     county_data.get("phenom", "")
+                "fips":          fips,
+                "county":        county_data.get("county", ""),
+                "state":         county_data.get("state", ""),
+                "population":    county_data.get("population", 0),
+                "event":         county_data.get("event", ""),
+                "sig":           county_data.get("sig", ""),
+                "phenom":        county_data.get("phenom", ""),
+                "severity_rank": county_data.get("severity_rank", 0),
+                "warning_count": county_data.get("warning_count", 1),
             }
             features.append(feat_copy)
     return flask_module.Response(
@@ -2710,6 +2733,15 @@ def mapbox_map():
             <span class="material-symbols-outlined" style="font-size:22px;">close</span>
         </button>
     </div>
+    <div id="top-impacted-panel" style="padding:12px 14px 10px;border-bottom:1px solid rgba(88,191,255,0.1);flex-shrink:0;">
+        <div style="font-size:10px;letter-spacing:2.5px;color:#FF8800;font-weight:700;font-family:'Space Grotesk',sans-serif;margin-bottom:8px;display:flex;align-items:center;gap:6px;">
+            <span class="material-symbols-outlined" style="font-size:14px;">priority_high</span>
+            TOP IMPACTED
+        </div>
+        <div id="top-impacted-list" style="display:flex;flex-direction:column;gap:4px;font-family:'Inter',sans-serif;">
+            <div style="color:#64748b;font-size:10px;letter-spacing:1px;">LOADING…</div>
+        </div>
+    </div>
     <div id="sidebar-layers-body" style="flex:1 1 auto;overflow-y:auto;overflow-x:hidden;padding:12px 14px 8px;display:flex;flex-direction:column;min-height:0;"></div>
     <div style="padding:10px 14px;border-top:1px solid rgba(88,191,255,0.1);flex-shrink:0;display:flex;gap:6px;">
         <button onclick="locateMe()" title="Near me (N)" style="flex:1;background:rgba(88,191,255,0.08);border:1px solid rgba(88,191,255,0.25);color:#a8d8ff;font-size:9px;font-weight:700;letter-spacing:1.5px;padding:7px 4px;cursor:pointer;font-family:'Inter',sans-serif;text-transform:uppercase;">⌖ Near Me</button>
@@ -3478,21 +3510,28 @@ function setupLayers() {{
     }});
 
     // ── AFFECTED COUNTIES ────────────────────────────
+    // Two-dimensional encoding: severity_rank -> color, population -> opacity
     map.addSource('counties', {{ type: 'geojson', data: '/api/counties' }});
     map.addLayer({{
         id: 'counties-fill', type: 'fill', source: 'counties',
         layout: {{ visibility: 'none' }},
         paint: {{
             'fill-color': [
+                'match', ['get', 'severity_rank'],
+                3, '#FF2222',   // Warning  — red
+                2, '#FF8800',   // Watch    — orange
+                1, '#FFCC00',   // Advisory — yellow
+                0, '#888888',   // Statement/unknown — gray
+                   '#888888'
+            ],
+            'fill-opacity': [
                 'interpolate', ['linear'],
                 ['get', 'population'],
-                0,       'rgba(255,100,0,0.1)',
-                50000,   'rgba(255,100,0,0.25)',
-                200000,  'rgba(255,80,0,0.4)',
-                500000,  'rgba(255,50,0,0.55)',
-                1000000, 'rgba(255,0,0,0.7)'
-            ],
-            'fill-opacity': 0.7
+                0,       0.25,
+                50000,   0.40,
+                500000,  0.60,
+                2000000, 0.80
+            ]
         }}
     }});
     map.addLayer({{
@@ -3507,10 +3546,11 @@ function setupLayers() {{
     map.on('click', 'counties-fill', (e) => {{
         const p = e.features[0].properties;
         showPopup('📍 ' + p.county + ', ' + p.state, {{
-            'Population': Number(p.population).toLocaleString(),
-            'Event': p.event || 'N/A',
-            'Alert Level': p.sig || 'N/A',
-            'FIPS': p.fips || 'N/A'
+            'Population':      Number(p.population).toLocaleString(),
+            'Highest alert':   p.event || 'N/A',
+            'Level':           p.sig || 'N/A',
+            'Active warnings': p.warning_count || 1,
+            'FIPS':            p.fips || 'N/A'
         }}, e);
     }});
     map.on('mouseenter', 'counties-fill', () => map.getCanvas().style.cursor = 'pointer');
@@ -3943,6 +3983,8 @@ function setupLayers() {{
         'fire_perimeters','storms','fema_disasters','river_gauges',
         'volcanoes','drought','shelters','air_quality'
     ].forEach(src => fetchSource(src));
+    // Populate Top Impacted panel once counties data lands on first load
+    fetchSource('counties').then(d => {{ try {{ renderTopImpacted(d); }} catch(e) {{}} }});
 
     // ── LAYER TOGGLE BUTTONS (rendered into left sidebar) ─────────────────────────
     const sidebarBody = document.getElementById('sidebar-layers-body');
@@ -4246,6 +4288,60 @@ function setupLayers() {{
     let _dataLoaded        = false;
     let _prevSummary       = null;
 
+    // Render the "Top Impacted" sidebar panel from /api/counties GeoJSON.
+    // Sort by (severity_rank DESC, population DESC) so all Warnings rank above
+    // all Watches regardless of population, biggest population wins within tier.
+    function renderTopImpacted(geojson) {{
+        const el = document.getElementById('top-impacted-list');
+        if (!el) return;
+        const feats = (geojson && geojson.features) || [];
+        if (!feats.length) {{
+            el.innerHTML = '<div style="color:#64748b;font-size:10px;letter-spacing:1px;">NO ACTIVE COUNTIES</div>';
+            return;
+        }}
+        const sorted = feats.slice().sort((a, b) => {{
+            const pa = a.properties || {{}}, pb = b.properties || {{}};
+            return (pb.severity_rank - pa.severity_rank) || (pb.population - pa.population);
+        }}).slice(0, 5);
+        const sigColor = {{ 3: '#FF2222', 2: '#FF8800', 1: '#FFCC00', 0: '#888888' }};
+        el.innerHTML = sorted.map(f => {{
+            const p = f.properties || {{}};
+            const popStr = Number(p.population || 0).toLocaleString();
+            const badge  = (p.warning_count > 1)
+                ? `<span style="margin-left:6px;font-size:9px;padding:1px 5px;background:rgba(255,136,0,0.2);border:1px solid rgba(255,136,0,0.4);color:#FF8800;border-radius:2px;">×${{p.warning_count}}</span>`
+                : '';
+            const dot = sigColor[p.severity_rank] || '#888';
+            return `<div class="impact-row" data-fips="${{p.fips}}" style="cursor:pointer;padding:6px 8px;border:1px solid rgba(88,191,255,0.08);background:rgba(88,191,255,0.03);transition:background 120ms ease;">
+                <div style="display:flex;align-items:center;gap:6px;">
+                    <span style="display:inline-block;width:6px;height:6px;background:${{dot}};flex-shrink:0;"></span>
+                    <span style="font-size:11px;color:#dde9fb;font-weight:600;">${{p.county}}, ${{p.state}}</span>
+                    ${{badge}}
+                </div>
+                <div style="font-size:9px;color:#a0acbd;letter-spacing:0.5px;margin-top:3px;margin-left:12px;">${{(p.event || 'N/A').toUpperCase()}} · ${{popStr}}</div>
+            </div>`;
+        }}).join('');
+        // Wire click-to-fly
+        el.querySelectorAll('.impact-row').forEach(row => {{
+            row.addEventListener('mouseenter', () => row.style.background = 'rgba(88,191,255,0.1)');
+            row.addEventListener('mouseleave', () => row.style.background = 'rgba(88,191,255,0.03)');
+            row.addEventListener('click', () => {{
+                const fips = row.getAttribute('data-fips');
+                const feat = (window._srcData.counties?.features || []).find(f => (f.properties || {{}}).fips === fips);
+                if (!feat) return;
+                try {{
+                    const c = turf.centroid(feat);
+                    const coords = c.geometry.coordinates;
+                    map.flyTo({{ center: coords, zoom: 7, duration: 900 }});
+                    // Ensure the counties layer is visible when the user flies in
+                    if (map.getLayer('counties-fill') && map.getLayoutProperty('counties-fill','visibility') !== 'visible') {{
+                        map.setLayoutProperty('counties-fill',   'visibility', 'visible');
+                        map.setLayoutProperty('counties-outline','visibility', 'visible');
+                    }}
+                }} catch(e) {{}}
+            }});
+        }});
+    }}
+
     function loadData() {{
         fetch('/api/summary').then(r => r.json()).then(data => {{
             const s = data.summary || {{}};
@@ -4315,6 +4411,8 @@ function setupLayers() {{
                  'fire_perimeters','storms','fema_disasters','river_gauges',
                  'volcanoes','drought','shelters','air_quality']
                     .forEach(src => fetchSource(src, true));
+                // Refresh Top Impacted list from the re-fetched counties data
+                fetchSource('counties', true).then(d => {{ try {{ renderTopImpacted(d); }} catch(e) {{}} }});
                 // Infrastructure intentionally NOT auto-refreshed — Overpass API
                 // takes up to 20s and the data changes rarely. Load once on first click.
             }}
