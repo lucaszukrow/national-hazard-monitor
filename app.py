@@ -14,6 +14,12 @@ Author: Lucas Zukrow | GSP318 | Cal Poly Humboldt
 """
 
 import os
+# Load .env for local dev. Silent no-op on Render (no .env file, no dotenv installed is fine).
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 import json
 import csv
 import time
@@ -2075,6 +2081,72 @@ def mapbox_map():
         .popup-row {{ display: flex; justify-content: space-between; align-items: center; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.04); }}
         .popup-key {{ color: rgba(255,255,255,0.4); font-size: 10px; letter-spacing: 1px; text-transform: uppercase; }}
         .popup-val {{ color: white; font-weight: 600; font-size: 12px; }}
+        /* ── SUPERMAN FLYOVER: glass "threat card" popup ── */
+        .mapboxgl-popup.superman-popup .mapboxgl-popup-content {{
+            padding: 0; background: transparent; box-shadow: none; border: none;
+        }}
+        .mapboxgl-popup.superman-popup .mapboxgl-popup-tip {{ display: none; }}
+        .threat-card {{
+            min-width: 300px; max-width: 360px;
+            background: rgba(4,15,27,0.95);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255,68,68,0.45);
+            box-shadow: 0 0 40px rgba(255,68,68,0.28), 0 16px 48px rgba(0,0,0,0.7);
+            overflow: hidden;
+            font-family: 'Inter', sans-serif;
+            animation: tcIn 400ms cubic-bezier(.2,.8,.3,1) both;
+        }}
+        .threat-card.sev-2 {{ border-color: rgba(255,136,0,0.5);  box-shadow: 0 0 40px rgba(255,136,0,0.28), 0 16px 48px rgba(0,0,0,0.7); }}
+        .threat-card.sev-1 {{ border-color: rgba(255,204,0,0.5);  box-shadow: 0 0 40px rgba(255,204,0,0.28), 0 16px 48px rgba(0,0,0,0.7); }}
+        .threat-card.sev-0 {{ border-color: rgba(136,136,136,0.5); box-shadow: 0 0 40px rgba(136,136,136,0.2),  0 16px 48px rgba(0,0,0,0.7); }}
+        @keyframes tcIn {{ from {{ opacity:0; transform:translateY(10px) scale(0.95); }} to {{ opacity:1; transform:none; }} }}
+        .threat-card .tc-banner {{
+            padding: 6px 14px;
+            background: linear-gradient(90deg, #FF2222, #FF6600);
+            display: flex; align-items: center; gap: 6px;
+            font-family: 'Space Grotesk', sans-serif; font-weight: 700;
+            font-size: 10px; letter-spacing: 2.5px; color: #fff; text-transform: uppercase;
+        }}
+        .threat-card.sev-2 .tc-banner {{ background: linear-gradient(90deg, #FF8800, #FFAA00); }}
+        .threat-card.sev-1 .tc-banner {{ background: linear-gradient(90deg, #FFCC00, #FFDD33); color:#2a1f00; }}
+        .threat-card.sev-0 .tc-banner {{ background: linear-gradient(90deg, #888, #aaa); color:#1a1a1a; }}
+        .threat-card .tc-body {{ padding: 16px 20px; }}
+        .threat-card .tc-title {{
+            font-family: 'Space Grotesk', sans-serif; font-weight: 700;
+            font-size: 20px; color: #dde9fb; margin-bottom: 2px;
+        }}
+        .threat-card .tc-sub {{
+            font-size: 10px; letter-spacing: 1.5px; color: #a0acbd;
+            text-transform: uppercase; margin-bottom: 14px;
+        }}
+        .threat-card .tc-row {{
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 7px 0; border-top: 1px solid rgba(88,191,255,0.08);
+            font-size: 12px;
+        }}
+        .threat-card .tc-row:first-of-type {{ border-top: none; padding-top: 0; }}
+        .threat-card .tc-label {{ color: #64748b; letter-spacing: 1px; text-transform: uppercase; font-size: 9px; }}
+        .threat-card .tc-value {{ color: #dde9fb; font-family: 'Fira Code', monospace; font-weight: 500; font-size: 11px; }}
+        .threat-card .tc-value.hot {{ color: #FF6666; }}
+        .threat-card .tc-actions {{
+            padding: 10px 18px; background: rgba(0,0,0,0.28);
+            display: flex; gap: 6px;
+        }}
+        .threat-card .tc-btn {{
+            flex: 1; padding: 7px 4px; font-size: 9px; letter-spacing: 1.5px;
+            font-family: 'Space Grotesk', sans-serif; font-weight: 700;
+            background: rgba(88,191,255,0.08);
+            border: 1px solid rgba(88,191,255,0.25); color: #a8d8ff;
+            cursor: pointer; text-transform: uppercase;
+            transition: background 120ms ease;
+        }}
+        .threat-card .tc-btn:hover {{ background: rgba(88,191,255,0.2); color: #dde9fb; }}
+        .threat-card .tc-close {{
+            position: absolute; top: 8px; right: 10px; z-index: 2;
+            background: transparent; border: none; color: rgba(255,255,255,0.5);
+            font-size: 18px; cursor: pointer; line-height: 1; padding: 4px;
+        }}
+        .threat-card .tc-close:hover {{ color: #fff; }}
         .mapboxgl-ctrl-group {{ background: rgba(11,27,42,0.96) !important; border: 1px solid rgba(88,191,255,0.15) !important; border-radius: 0 !important; }}
         .mapboxgl-ctrl-group button {{ background: transparent !important; }}
         .mapboxgl-ctrl-group button span {{ filter: invert(1) brightness(0.7); }}
@@ -3095,6 +3167,9 @@ def mapbox_map():
     </div>
     <div id="popup-content"></div>
 </div>
+
+<!-- Superman flyover threat-card host (fills on supermanFlyTo; stays empty otherwise) -->
+<div id="threat-card-host" style="position:fixed;top:96px;left:50%;transform:translateX(-50%);z-index:57;pointer-events:auto;"></div>
 
 <script>
 mapboxgl.accessToken = '{MAPBOX_TOKEN}';
@@ -4288,6 +4363,138 @@ function setupLayers() {{
     let _dataLoaded        = false;
     let _prevSummary       = null;
 
+    // ── 3D Superman flyover ──────────────────────────────────────────────
+    // Terrain + 3D buildings + sky/fog are set up lazily on first flyover so
+    // the default 2D view isn't paying the per-frame 3D render cost.
+    let _threeDReady = false;
+    function ensureThreeD() {{
+        if (_threeDReady) return;
+        _threeDReady = true;
+        try {{
+            if (!map.getSource('mapbox-dem')) {{
+                map.addSource('mapbox-dem', {{
+                    type: 'raster-dem',
+                    url: 'mapbox://mapbox.mapbox-terrain-dem-v1',
+                    tileSize: 512, maxzoom: 14
+                }});
+            }}
+            map.setTerrain({{ source: 'mapbox-dem', exaggeration: 1.3 }});
+            map.setFog({{
+                'range': [0.8, 8],
+                'color': '#0b1b2a',
+                'horizon-blend': 0.2,
+                'space-color': '#030712',
+                'star-intensity': 0.5
+            }});
+            if (!map.getLayer('sky')) {{
+                map.addLayer({{
+                    id: 'sky', type: 'sky',
+                    paint: {{ 'sky-type': 'atmosphere', 'sky-atmosphere-sun-intensity': 12 }}
+                }});
+            }}
+            if (!map.getLayer('buildings-3d')) {{
+                // Insert 3D buildings beneath label symbols so street names still read.
+                const layers = map.getStyle().layers || [];
+                const labelLayer = layers.find(l => l.type === 'symbol' && l.layout && l.layout['text-field']);
+                map.addLayer({{
+                    id: 'buildings-3d', type: 'fill-extrusion',
+                    source: 'composite', 'source-layer': 'building',
+                    minzoom: 13,
+                    filter: ['==', ['get', 'extrude'], 'true'],
+                    paint: {{
+                        'fill-extrusion-color': [
+                            'interpolate', ['linear'], ['get', 'height'],
+                            0, '#243447', 50, '#38546f', 150, '#5eb3ff'
+                        ],
+                        'fill-extrusion-height': ['get', 'height'],
+                        'fill-extrusion-base':   ['get', 'min_height'],
+                        'fill-extrusion-opacity': 0.85
+                    }}
+                }}, labelLayer ? labelLayer.id : undefined);
+            }}
+        }} catch(err) {{ console.warn('3D setup failed:', err); }}
+    }}
+
+    function dismissThreatCard() {{
+        const host = document.getElementById('threat-card-host');
+        if (host) host.innerHTML = '';
+    }}
+
+    function showThreatCard(props) {{
+        const host = document.getElementById('threat-card-host');
+        if (!host) return;
+        const rank = Number(props.severity_rank || 0);
+        const pop  = Number(props.population || 0).toLocaleString();
+        const ev   = String(props.event || 'ACTIVE ALERT').toUpperCase();
+        const lvl  = props.sig || 'N/A';
+        const wct  = Number(props.warning_count || 1);
+        const fips = props.fips || 'N/A';
+        const title = (props.county || 'Unknown') + (props.state ? ', ' + props.state : '');
+        const multiRow = wct > 1
+            ? `<div class="tc-row"><span class="tc-label">Active Warnings</span><span class="tc-value hot">${{wct}}</span></div>` : '';
+        host.innerHTML = `
+            <div class="threat-card sev-${{rank}}" style="position:relative;">
+                <button class="tc-close" aria-label="Close">×</button>
+                <div class="tc-banner">◉ ${{ev}}</div>
+                <div class="tc-body">
+                    <div class="tc-title">${{title}}</div>
+                    <div class="tc-sub">Population ${{pop}}</div>
+                    <div class="tc-row"><span class="tc-label">Alert Level</span><span class="tc-value">${{lvl}}</span></div>
+                    ${{multiRow}}
+                    <div class="tc-row"><span class="tc-label">FIPS</span><span class="tc-value">${{fips}}</span></div>
+                </div>
+                <div class="tc-actions">
+                    <button class="tc-btn" data-action="detail">County Detail</button>
+                    <button class="tc-btn" data-action="nws">NWS Alert</button>
+                    <button class="tc-btn" data-action="ai">AI Brief</button>
+                </div>
+            </div>`;
+        host.querySelector('.tc-close').addEventListener('click', dismissThreatCard);
+        host.querySelectorAll('.tc-btn').forEach(btn => {{
+            btn.addEventListener('click', () => {{
+                const a = btn.getAttribute('data-action');
+                if (a === 'nws') {{
+                    window.open('https://alerts.weather.gov/search?q=' + encodeURIComponent((props.county||'') + ' ' + (props.state||'')), '_blank');
+                }} else if (a === 'detail') {{
+                    const slug = String((props.county||'') + 'county' + (props.state||'')).toLowerCase().replace(/\\s+/g,'');
+                    window.open('https://www.census.gov/quickfacts/fact/table/' + encodeURIComponent(slug), '_blank');
+                }} else if (a === 'ai') {{
+                    if (typeof generateSitrep === 'function') generateSitrep();
+                    else if (typeof window.generateSitrep === 'function') window.generateSitrep();
+                    else alert('AI briefing is available from the header button.');
+                }}
+            }});
+        }});
+    }}
+
+    // Two-stage cinematic flyover. Stage 1 glides in on a curve; stage 2 swoops
+    // down to street level with pitch/bearing so 3D buildings become visible.
+    function supermanFlyTo(feat, propsOverride) {{
+        if (!feat) return;
+        ensureThreeD();
+        let center;
+        try {{ center = turf.centroid(feat).geometry.coordinates; }}
+        catch(e) {{ return; }}
+        // Reveal the affected-counties layer so the target county stays highlighted.
+        if (map.getLayer('counties-fill') && map.getLayoutProperty('counties-fill','visibility') !== 'visible') {{
+            map.setLayoutProperty('counties-fill',   'visibility', 'visible');
+            map.setLayoutProperty('counties-outline','visibility', 'visible');
+        }}
+        dismissThreatCard();
+        // Stage 1 — approach
+        map.flyTo({{
+            center, zoom: 9.8, pitch: 55, bearing: -18,
+            speed: 0.9, curve: 1.6, essential: true
+        }});
+        // Stage 2 — swoop to street level
+        setTimeout(() => {{
+            map.easeTo({{ center, zoom: 12.5, pitch: 68, bearing: -22, duration: 4200 }});
+        }}, 1600);
+        // Reveal the threat card shortly before the swoop settles
+        const props = propsOverride || feat.properties || {{}};
+        setTimeout(() => showThreatCard(props), 5400);
+    }}
+
     // Render the "Top Impacted" sidebar panel from /api/counties GeoJSON.
     // Sort by (severity_rank DESC, population DESC) so all Warnings rank above
     // all Watches regardless of population, biggest population wins within tier.
@@ -4328,16 +4535,8 @@ function setupLayers() {{
                 const fips = row.getAttribute('data-fips');
                 const feat = (window._srcData.counties?.features || []).find(f => (f.properties || {{}}).fips === fips);
                 if (!feat) return;
-                try {{
-                    const c = turf.centroid(feat);
-                    const coords = c.geometry.coordinates;
-                    map.flyTo({{ center: coords, zoom: 7, duration: 900 }});
-                    // Ensure the counties layer is visible when the user flies in
-                    if (map.getLayer('counties-fill') && map.getLayoutProperty('counties-fill','visibility') !== 'visible') {{
-                        map.setLayoutProperty('counties-fill',   'visibility', 'visible');
-                        map.setLayoutProperty('counties-outline','visibility', 'visible');
-                    }}
-                }} catch(e) {{}}
+                // Cinematic 3D flyover + glass threat-card popup
+                try {{ supermanFlyTo(feat, feat.properties || {{}}); }} catch(e) {{ console.warn('supermanFlyTo:', e); }}
             }});
         }});
     }}
