@@ -123,6 +123,54 @@ phenom_names = {
     "AV": "Avalanche", "HZ": "Hard Freeze", "FZ": "Freeze",
     "FR": "Frost", "ZR": "Freezing Rain", "EC": "Extreme Cold"
 }
+
+# ── Severity classification ──────────────────────────────────────────
+# Five tiers used everywhere in the new Command Center UI. Map onto
+# the tokens.css palette: --sev-extreme, --sev-severe, --sev-moderate,
+# --sev-minor, --sev-info.
+PHENOM_SEVERITY = {
+    "TO": "extreme", "HU": "extreme", "FF": "extreme", "SS": "extreme",
+    "BZ": "severe",  "EH": "severe",  "SV": "severe",  "TS": "severe",
+    "WS": "severe",  "FW": "severe",  "HW": "severe",  "EC": "severe",
+    "CF": "moderate","FA": "moderate","HZ": "moderate","FZ": "moderate",
+    "ZR": "moderate","DS": "moderate","AV": "moderate","MA": "moderate",
+    "FR": "minor",
+}
+
+def severity_for_phenom(phenom):
+    return PHENOM_SEVERITY.get(str(phenom or "").strip().upper(), "minor")
+
+def severity_for_magnitude(mag):
+    """USGS earthquake magnitude → severity tier."""
+    try:
+        m = float(mag or 0)
+    except (TypeError, ValueError):
+        return "info"
+    if m >= 6.0: return "extreme"
+    if m >= 5.0: return "severe"
+    if m >= 4.0: return "moderate"
+    if m >= 3.0: return "minor"
+    return "info"
+
+def severity_for_gauge_status(status):
+    """NOAA AHPS river-gauge status → severity tier."""
+    s = str(status or "").strip().lower()
+    return {"major": "extreme", "moderate": "severe",
+            "minor": "moderate", "action": "minor"}.get(s, "info")
+
+def severity_for_fire_confidence(conf):
+    """FIRMS confidence flag (h/n/l or 0–100) → severity tier."""
+    c = str(conf or "").strip().lower()
+    if c in ("h", "high"): return "severe"
+    if c in ("n", "nominal"): return "moderate"
+    if c in ("l", "low"): return "minor"
+    try:
+        cn = float(c)
+        if cn >= 80: return "severe"
+        if cn >= 30: return "moderate"
+        return "minor"
+    except (TypeError, ValueError):
+        return "moderate"
 state_fips = {
     "01":"Alabama","02":"Alaska","04":"Arizona","05":"Arkansas",
     "06":"California","08":"Colorado","09":"Connecticut","10":"Delaware",
@@ -1238,6 +1286,7 @@ def run_update():
                     "river_gauges":     len(river_gauges.get("features", [])),
                     "volcanoes":        len(volcanoes.get("features", [])),
                     "drought":          len(drought.get("features", [])),
+                    "shelters":         len(shelters.get("features", [])),
                     "affected_counties": affected
                 }
             })
@@ -1923,6 +1972,142 @@ def api_shelters():
     """Returns FEMA open emergency shelters as GeoJSON."""
     return flask_module.Response(
         json.dumps(state.get("shelters", {"type":"FeatureCollection","features":[]})),
+        mimetype="application/json",
+        headers={"Access-Control-Allow-Origin": "*"}
+    )
+
+@app.server.route("/api/events")
+def api_events():
+    """Unified live feed for the Command Center right column.
+
+    Merges the most recent items from warnings / earthquakes / fire
+    detections / river gauges into one list, sorts by time descending,
+    returns the top 20 with a uniform shape: {source, time, text, sev,
+    lng, lat}.
+    """
+    SIG_NAMES = {"W": "Warning", "A": "Watch", "Y": "Advisory", "S": "Statement"}
+
+    def _coords_from_geom(geom):
+        """Best-effort centroid coords for a feature geometry."""
+        if not isinstance(geom, dict):
+            return None, None
+        gtype  = geom.get("type", "")
+        coords = geom.get("coordinates")
+        if not coords:
+            return None, None
+        try:
+            if gtype == "Point":
+                return float(coords[0]), float(coords[1])
+            if gtype == "MultiPoint" or gtype == "LineString":
+                return float(coords[0][0]), float(coords[0][1])
+            if gtype == "Polygon":
+                ring = coords[0] or []
+                if not ring: return None, None
+                xs = [p[0] for p in ring]; ys = [p[1] for p in ring]
+                return sum(xs)/len(xs), sum(ys)/len(ys)
+            if gtype == "MultiPolygon":
+                ring = (coords[0] or [[]])[0] or []
+                if not ring: return None, None
+                xs = [p[0] for p in ring]; ys = [p[1] for p in ring]
+                return sum(xs)/len(xs), sum(ys)/len(ys)
+        except (TypeError, ValueError, IndexError):
+            return None, None
+        return None, None
+
+    # Per-source cap — without this, NOAA's hundreds of river gauges (all
+    # stamped with the same "now" since the feed has no per-gauge time) win
+    # every sort tie and crowd warnings/quakes/fires off the feed.
+    PER_SOURCE_CAP = 5
+    events = []
+
+    # NWS warnings — `sent` is ISO 8601 string; `phenom` and `sig` define the event.
+    for f in state.get("warnings", {}).get("features", [])[:30]:
+        p = f.get("properties") or {}
+        phenom = str(p.get("phenom", "")).strip().upper()
+        sig    = str(p.get("sig", "")).strip().upper()
+        name   = phenom_names.get(phenom, phenom or "Alert")
+        text   = (name + " " + SIG_NAMES.get(sig, "")).strip()
+        lng, lat = _coords_from_geom(f.get("geometry") or {})
+        events.append({
+            "source": "NWS",
+            "time":   p.get("sent") or p.get("issuance") or "",
+            "text":   text,
+            "sev":    severity_for_phenom(phenom),
+            "lng":    lng, "lat": lat,
+        })
+
+    # USGS earthquakes — `time` is ms-since-epoch integer.
+    for f in state.get("earthquakes", {}).get("features", [])[:30]:
+        p = f.get("properties") or {}
+        mag   = p.get("mag")
+        place = p.get("place") or "Unknown location"
+        try:
+            time_iso = datetime.datetime.utcfromtimestamp(
+                float(p.get("time", 0)) / 1000.0
+            ).strftime("%Y-%m-%dT%H:%M:%SZ") if p.get("time") else ""
+        except (TypeError, ValueError):
+            time_iso = ""
+        try:
+            mag_str = "M{:.1f}".format(float(mag))
+        except (TypeError, ValueError):
+            mag_str = "M?"
+        lng, lat = _coords_from_geom(f.get("geometry") or {})
+        events.append({
+            "source": "USGS",
+            "time":   time_iso,
+            "text":   f"{mag_str} earthquake — {place}",
+            "sev":    severity_for_magnitude(mag),
+            "lng":    lng, "lat": lat,
+        })
+
+    # NASA FIRMS fire detections — list of dicts with acq_date + acq_time.
+    for fire in (state.get("fires") or [])[:30]:
+        date = str(fire.get("acq_date", "")).strip()
+        tm   = str(fire.get("acq_time", "")).strip().zfill(4)
+        time_iso = f"{date}T{tm[:2]}:{tm[2:]}:00Z" if date and len(tm) == 4 else ""
+        try:
+            lng = float(fire.get("longitude", 0))
+            lat = float(fire.get("latitude",  0))
+        except (TypeError, ValueError):
+            lng, lat = None, None
+        events.append({
+            "source": "FIRMS",
+            "time":   time_iso,
+            "text":   f"Fire detection ({fire.get('confidence','?')}) at {lat:.2f}, {lng:.2f}"
+                      if lat is not None and lng is not None else "Fire detection",
+            "sev":    severity_for_fire_confidence(fire.get("confidence")),
+            "lng":    lng, "lat": lat,
+        })
+
+    # NOAA river gauges — no per-gauge timestamp; assume "now" so they
+    # mix into the recent feed instead of sorting last.
+    now_iso = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    for f in state.get("river_gauges", {}).get("features", [])[:30]:
+        p = f.get("properties") or {}
+        loc    = p.get("location") or p.get("name") or "Unknown gauge"
+        status = (p.get("status") or "").lower() or "alert"
+        lng, lat = _coords_from_geom(f.get("geometry") or {})
+        events.append({
+            "source": "NOAA",
+            "time":   now_iso,
+            "text":   f"{status.title()} flood stage — {loc}",
+            "sev":    severity_for_gauge_status(status),
+            "lng":    lng, "lat": lat,
+        })
+
+    # Bucket by source, sort each bucket newest-first, take PER_SOURCE_CAP.
+    # Then merge and final-sort so the feed reads chronologically but still
+    # shows every source that has anything to report.
+    buckets = {}
+    for e in events:
+        buckets.setdefault(e["source"], []).append(e)
+    balanced = []
+    for src, items in buckets.items():
+        items.sort(key=lambda e: e.get("time") or "", reverse=True)
+        balanced.extend(items[:PER_SOURCE_CAP])
+    balanced.sort(key=lambda e: e.get("time") or "", reverse=True)
+    return flask_module.Response(
+        json.dumps({"events": balanced[:20]}),
         mimetype="application/json",
         headers={"Access-Control-Allow-Origin": "*"}
     )
