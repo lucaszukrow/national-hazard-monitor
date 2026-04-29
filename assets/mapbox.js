@@ -1,5 +1,35 @@
 mapboxgl.accessToken = window.MAPBOX_TOKEN || '';
 
+// ── Command Center compat shim ──────────────────────────────────────
+// The legacy /mapbox JS still references DOM ids from the pre-redesign
+// shell (stat-warnings, county-hero, top-impacted-list, sitrep-overlay,
+// hazard-overview chart, etc.). The new Command Center template doesn't
+// render any of those. Rather than null-crash on every loadData tick,
+// missing-id lookups return a proxy that silently swallows reads/writes
+// and chained method calls. Real elements still work normally.
+(function installDeadElementShim() {
+    const _origGetById = document.getElementById.bind(document);
+    const noop = () => DEAD;
+    const DEAD = new Proxy(function () {}, {
+        get(_, prop) {
+            if (prop === Symbol.toPrimitive || prop === 'toString') return () => '';
+            if (prop === 'length') return 0;
+            if (prop === 'forEach' || prop === 'add' || prop === 'remove'
+                || prop === 'addEventListener' || prop === 'removeEventListener'
+                || prop === 'setProperty' || prop === 'appendChild' || prop === 'closest'
+                || prop === 'querySelector' || prop === 'querySelectorAll'
+                || prop === 'contains' || prop === 'matches' || prop === 'focus' || prop === 'blur'
+                || prop === 'click') return noop;
+            return DEAD;
+        },
+        set() { return true; },
+        apply() { return DEAD; },
+    });
+    document.getElementById = function (id) {
+        return _origGetById(id) || DEAD;
+    };
+})();
+
 const HAZARD_COLORS = {
     'TO': '#FF0000', 'FF': '#00BFFF', 'HU': '#FF6600',
     'TS': '#FF9900', 'SV': '#FF6666', 'WS': '#AAAAFF',
@@ -1367,164 +1397,201 @@ function setupLayers() {
         });
     }
 
+    // ── Command Center bindings ───────────────────────────────────────
+    // Populates: KPI strip ([data-kpi]), priority queue (#queue-list),
+    // live feed (#feed-list), ops clock + sync subline, and refreshes
+    // every Mapbox source via the existing fetchSource() pipeline.
+
+    const SEV_FOR_RANK = { 3: 'extreme', 2: 'severe', 1: 'moderate', 0: 'info' };
+
+    function _fmtPop(n) {
+        if (!n) return '0';
+        if (n >= 1e9) return (n / 1e9).toFixed(2) + 'B';
+        if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M';
+        if (n >= 1e3) return (n / 1e3).toFixed(0) + 'K';
+        return String(n);
+    }
+
+    function _setKpi(kpi, value, opts) {
+        const tile = document.querySelector(`.kpi[data-kpi="${kpi}"]`);
+        if (!tile || tile === undefined) return;
+        const val = tile.querySelector('.kpi-val');
+        const dlt = tile.querySelector('.kpi-delta');
+        if (val) val.textContent = value;
+        if (dlt && opts && typeof opts.delta === 'number') {
+            const d = opts.delta;
+            if (d === 0) { dlt.textContent = ''; dlt.className = 'kpi-delta mono tnum'; }
+            else {
+                dlt.textContent = (d > 0 ? '+' : '') + d;
+                dlt.className   = 'kpi-delta mono tnum ' + (d > 0 ? 'up' : 'down');
+            }
+        }
+    }
+
+    function _renderQueue(affected) {
+        const host = document.getElementById('queue-list');
+        if (!host || host === undefined || !host.innerHTML) {
+            // host may be the dead-element proxy; bail if so.
+            if (!host || typeof host.innerHTML === 'undefined') return;
+        }
+        const meta = document.getElementById('queue-meta');
+        if (!Array.isArray(affected) || !affected.length) {
+            host.innerHTML = '<div class="empty-state">No affected counties.</div>';
+            if (meta) meta.textContent = '0 events';
+            return;
+        }
+        const sorted = affected.slice().sort((a, b) =>
+            (b.severity_rank - a.severity_rank) || (b.population - a.population)
+        ).slice(0, 12);
+        if (meta) meta.textContent = `${affected.length} events · click to fly`;
+        host.innerHTML = sorted.map(r => {
+            const sev = SEV_FOR_RANK[r.severity_rank] || 'info';
+            const evt = String(r.event || 'Active alert');
+            const area = `${r.county || '?'}, ${r.state || ''}`.trim();
+            const pop = _fmtPop(r.population || 0);
+            const wct = (r.warning_count > 1) ? ` · ×${r.warning_count}` : '';
+            return `<div class="queue-row" data-fips="${r.fips || ''}">
+                <div class="queue-bar sev-${sev}"></div>
+                <div class="queue-main">
+                    <div class="queue-name">${evt}</div>
+                    <div class="queue-meta">${area}${wct}</div>
+                </div>
+                <div class="queue-pop">
+                    <div class="queue-pop-val">${pop}</div>
+                    <div class="queue-pop-lbl">POP</div>
+                </div>
+            </div>`;
+        }).join('');
+        // Click → flyTo county centroid (uses /api/counties cached data).
+        host.querySelectorAll('.queue-row').forEach(row => {
+            row.addEventListener('click', () => {
+                const fips = row.getAttribute('data-fips');
+                const feats = (window._srcData && window._srcData.counties && window._srcData.counties.features) || [];
+                const feat = feats.find(f => (f.properties || {}).fips === fips);
+                host.querySelectorAll('.queue-row.active').forEach(r => r.classList.remove('active'));
+                row.classList.add('active');
+                if (!feat) return;
+                try {
+                    const c = turf.centroid(feat).geometry.coordinates;
+                    map.flyTo({ center: c, zoom: 7, speed: 1.2 });
+                } catch (e) { /* swallow */ }
+            });
+        });
+    }
+
+    function _renderFeed(events) {
+        const host = document.getElementById('feed-list');
+        if (!host || typeof host.innerHTML === 'undefined') return;
+        if (!Array.isArray(events) || !events.length) {
+            host.innerHTML = '<div class="empty-state">No recent events.</div>';
+            return;
+        }
+        host.innerHTML = events.slice(0, 8).map(e => {
+            const t = (e.time || '').slice(11, 19) || '—';
+            const src = (e.source || '?').toUpperCase();
+            const sev = e.sev || 'info';
+            return `<div class="feed-row">
+                <span class="feed-time">${t}</span>
+                <span class="feed-src sev-${sev}">${src}</span>
+                <span class="feed-msg">${(e.text || '').replace(/</g, '&lt;')}</span>
+            </div>`;
+        }).join('');
+    }
+
+    function _renderClock(lastUpdate) {
+        const clock = document.getElementById('ops-clock');
+        const sub   = document.getElementById('ops-clock-sub');
+        const dot   = document.getElementById('status-dot');
+        const status = document.getElementById('rail-status');
+        const now = new Date();
+        if (clock) clock.textContent = now.toTimeString().slice(0, 8);
+        if (sub) {
+            if (lastUpdate && lastUpdate !== 'Never') {
+                const parsed = new Date(String(lastUpdate).replace(' ', 'T'));
+                const ageMin = isNaN(parsed) ? null : Math.floor((Date.now() - parsed.getTime()) / 60000);
+                const next   = ageMin === null ? '—' : Math.max(0, 30 - ageMin) + 'm';
+                sub.textContent = `Last sync ${ageMin === null ? '—' : ageMin + 'm ago'} · Next in ${next}`;
+                if (dot && dot.style && status) {
+                    if (ageMin === null || ageMin > 60) {
+                        dot.classList.add('alert'); status.textContent = 'STALE';
+                    } else {
+                        dot.classList.remove('alert');
+                        status.textContent = ageMin > 30 ? 'DELAYED' : 'NOMINAL';
+                    }
+                }
+            } else {
+                sub.textContent = 'Acquiring live data…';
+            }
+        }
+    }
+
+    let _prevSummary = null;
+    let _dataLoaded  = false;
+
     function loadData() {
         fetch('/api/summary').then(r => r.json()).then(data => {
             const s = data.summary || {};
-            const hasData = (s.warnings_count > 0 || s.earthquakes > 0 || s.wildfires > 0);
+            const prev = _prevSummary || {};
+            const delta = (a, b) => (a || 0) - (b || 0);
 
-            document.getElementById('stat-warnings').textContent = s.warnings_count || 0;
-            document.getElementById('stat-eq').textContent       = s.earthquakes    || 0;
-            document.getElementById('stat-fires').textContent    = s.wildfires      || 0;
-            document.getElementById('stat-spc').textContent      = s.spc_zones      || 0;
+            _setKpi('warnings',   s.warnings_count   || 0, { delta: delta(s.warnings_count,   prev.warnings_count) });
+            _setKpi('severe',     s.spc_zones        || 0, { delta: delta(s.spc_zones,        prev.spc_zones) });
+            _setKpi('hurricanes', s.active_storms    || 0);
+            _setKpi('quakes',     s.earthquakes      || 0, { delta: delta(s.earthquakes,      prev.earthquakes) });
+            _setKpi('fires',      s.wildfires        || 0, { delta: delta(s.wildfires,        prev.wildfires) });
+            _setKpi('gauges',     s.river_gauges     || 0);
+            _setKpi('population', _fmtPop(s.total_population || 0));
+            _setKpi('shelters',   s.shelters         || 0);
 
-            // ── DELTA INDICATORS ──────────────────────────────
-            if (_prevSummary) {
-                const applyDelta = (id, newVal, oldVal) => {
-                    const el = document.getElementById(id);
-                    if (!el) return;
-                    const d = (newVal || 0) - (oldVal || 0);
-                    if (d === 0) { el.textContent = ''; el.className = 'stat-delta'; return; }
-                    el.textContent = (d > 0 ? '+' : '') + d;
-                    el.className   = 'stat-delta ' + (d > 0 ? 'up' : 'down');
-                };
-                applyDelta('delta-warnings', s.warnings_count, _prevSummary.warnings_count);
-                applyDelta('delta-eq',       s.earthquakes,    _prevSummary.earthquakes);
-                applyDelta('delta-fires',    s.wildfires,      _prevSummary.wildfires);
-                applyDelta('delta-spc',      s.spc_zones,      _prevSummary.spc_zones);
-            }
             _prevSummary = Object.assign({}, s);
+            _renderClock(data.last_update);
+            _renderQueue(s.affected_counties || []);
 
-            // Remove skeleton shimmer on first successful data load
-            if (!_dataLoaded) {
-                _dataLoaded = true;
-                document.querySelectorAll('.skel').forEach(el => el.classList.remove('skel'));
-            }
-            updateSeverityBar(s);
-            if (document.getElementById('stat-counties')) {
-                document.getElementById('stat-counties').textContent = s.counties_count || 0;
-            }
-            if (document.getElementById('stat-pop')) {
-                const pop = s.total_population || 0;
-                document.getElementById('stat-pop').textContent = pop > 1000000
-                    ? (pop/1000000).toFixed(1) + 'M'
-                    : pop > 1000 ? (pop/1000).toFixed(0) + 'K' : pop;
-            }
-
-            if (data.last_update && data.last_update !== 'Never') {
-                document.getElementById('update-time').textContent = 'LAST UPDATED: ' + data.last_update;
-                // ── AGE INDICATOR ─────────────────────────────
-                const dotEl = document.getElementById('live-dot');
-                const parsed = new Date(data.last_update.replace(' ', 'T'));
-                if (!isNaN(parsed)) {
-                    const ageMin = (Date.now() - parsed.getTime()) / 60000;
-                    const dotColor = ageMin < 15 ? '#00FF88' : ageMin < 40 ? '#FFCC00' : '#FF4400';
-                    dotEl.style.setProperty('--dot-color', dotColor);
-                    dotEl.style.background = dotColor;
-                    dotEl.style.boxShadow = `0 0 8px ${dotColor}`;
-                }
-            } else {
-                document.getElementById('update-time').textContent = 'ACQUIRING LIVE DATA...';
-            }
-
-            updateHazardChart(s);
-
-            // Refresh all sources in parallel via shared cache (force=true bypasses dedup).
-            // Skip while a buffer search is active — sources hold filtered data and
-            // refreshing would overwrite the buffer clip.
+            // Refresh map sources via existing pipeline (declared in setupLayers scope).
             if (map.loaded() && _searchContext === null && typeof fetchSource === 'function') {
                 ['warnings','spc','earthquakes','fires','counties','lightning',
                  'fire_perimeters','storms','fema_disasters','river_gauges',
                  'volcanoes','drought','shelters','air_quality']
                     .forEach(src => fetchSource(src, true));
-                // Refresh Top Impacted list from the re-fetched counties data
-                fetchSource('counties', true).then(d => { try { renderTopImpacted(d); } catch(e) {} });
-                // Infrastructure intentionally NOT auto-refreshed — Overpass API
-                // takes up to 20s and the data changes rarely. Load once on first click.
             }
 
-            // If no data yet retry in 10 seconds
-            if (!hasData) {
-                console.log('No data yet, retrying in 10s...');
+            // Live feed comes from /api/events (added in the previous commit).
+            fetch('/api/events').then(r => r.json()).then(d => {
+                _renderFeed((d && d.events) || []);
+            }).catch(() => { /* silent */ });
+
+            // Retry quickly if backend has zero data (cold start).
+            const hasAny = (s.warnings_count > 0 || s.earthquakes > 0 || s.wildfires > 0
+                            || s.river_gauges > 0 || s.spc_zones > 0);
+            if (!hasAny && !_dataLoaded) {
                 setTimeout(loadData, 10000);
                 return;
             }
-
-            // ── STAT CARD FLY-TO ─────────────────────────
-            // Fetch hazard centroids once data is loaded, wire up click handlers
-            if (!_latestWarnings) {
-                fetch('/api/warnings').then(r=>r.json()).then(d=>{ _latestWarnings = d; wireStatCards(); }).catch(()=>{});
-                fetch('/api/earthquakes').then(r=>r.json()).then(d=>{ _latestEarthquakes = d; wireStatCards(); }).catch(()=>{});
-                fetch('/api/fires').then(r=>r.json()).then(d=>{ _latestFires = d; wireStatCards(); }).catch(()=>{});
-                fetch('/api/storms').then(r=>r.json()).then(d=>{ _latestStorms = d; }).catch(()=>{});
-            }
+            _dataLoaded = true;
         }).catch(err => {
-            console.log('Fetch failed, retrying in 10s...', err);
+            console.warn('loadData failed, retry in 10s:', err);
             setTimeout(loadData, 10000);
         });
     }
 
-    function wireStatCards() {
-        // Warnings card → fly to centroid of all warning features
-        const warnEl = document.getElementById('stat-warnings').closest('.stat-card');
-        if (warnEl && _latestWarnings?.features?.length) {
-            warnEl.onclick = () => {
-                try {
-                    const pts = _latestWarnings.features.flatMap(f => {
-                        const c = f.geometry?.coordinates;
-                        if (!c) return [];
-                        const flat = [];
-                        const walk = a => Array.isArray(a[0]) ? a.forEach(walk) : flat.push(a);
-                        walk(c); return flat;
-                    });
-                    if (pts.length) {
-                        const lng = pts.reduce((s,p)=>s+p[0],0)/pts.length;
-                        const lat = pts.reduce((s,p)=>s+p[1],0)/pts.length;
-                        map.flyTo({center:[lng,lat], zoom:5, duration:1400});
-                    }
-                } catch(e) {}
-            };
-        }
+    // Ops-clock tick (independent of API refresh — keeps the seconds moving).
+    setInterval(() => _renderClock(_prevSummary && _prevSummary._last_update), 1000);
 
-        // Earthquakes card → fly to largest earthquake
-        const eqEl = document.getElementById('stat-eq').closest('.stat-card');
-        if (eqEl && _latestEarthquakes?.features?.length) {
-            eqEl.onclick = () => {
-                const biggest = _latestEarthquakes.features
-                    .filter(f => f.geometry?.coordinates)
-                    .sort((a,b) => (b.properties?.mag||0) - (a.properties?.mag||0))[0];
-                if (biggest) {
-                    const [lng, lat] = biggest.geometry.coordinates;
-                    map.flyTo({center:[lng,lat], zoom:6, duration:1400});
-                }
-            };
-        }
+    // Update layer-count badge whenever a layer's visibility flips.
+    map.on('idle', () => {
+        const badge = document.getElementById('layer-count-val');
+        if (!badge || typeof badge.textContent === 'undefined') return;
+        try {
+            const layers = (map.getStyle().layers || [])
+                .filter(l => l.id && !l.id.startsWith('mapbox-')
+                          && l.layout && l.layout.visibility !== 'none');
+            badge.textContent = String(layers.length);
+        } catch (e) { /* swallow */ }
+    });
 
-        // Fires card → fly to densest fire area
-        const fireEl = document.getElementById('stat-fires').closest('.stat-card');
-        if (fireEl && _latestFires?.features?.length) {
-            fireEl.onclick = () => {
-                try {
-                    const pts = _latestFires.features.filter(f=>f.geometry?.coordinates);
-                    if (pts.length) {
-                        // Find centroid
-                        const lng = pts.reduce((s,f)=>s+f.geometry.coordinates[0],0)/pts.length;
-                        const lat = pts.reduce((s,f)=>s+f.geometry.coordinates[1],0)/pts.length;
-                        map.flyTo({center:[lng,lat], zoom:5, duration:1400});
-                    }
-                } catch(e) {}
-            };
-        }
-
-        // SPC card → fly to center of CONUS (SPC covers CONUS)
-        const spcEl = document.getElementById('stat-spc').closest('.stat-card');
-        if (spcEl) {
-            spcEl.onclick = () => map.flyTo({center:[-98.35,39.5], zoom:4, duration:1400});
-        }
-    }
-
-    // Load immediately then every 5 minutes
+    // Initial load + 5-minute refresh.
     loadData();
-    setInterval(loadData, 10 * 60 * 1000);
+    setInterval(loadData, 5 * 60 * 1000);
 }
 
 // Use exact Mapbox recommended pattern
