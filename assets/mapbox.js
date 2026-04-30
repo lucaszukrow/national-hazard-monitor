@@ -903,6 +903,13 @@ function setupLayers() {
                 if (map.getSource(srcName) && map.getSource(srcName).setData) {
                     map.getSource(srcName).setData(d);
                 }
+                // Notify the layer panel (or anything else) that fresh data
+                // for this source landed — used to refresh the count badges.
+                try {
+                    document.dispatchEvent(new CustomEvent('hazardSource', {
+                        detail: { srcName, data: d }
+                    }));
+                } catch (e) { /* IE etc. — not a concern here */ }
                 return d;
             })
             .catch(() => { delete window._srcPromises[srcName]; return null; });
@@ -1397,6 +1404,151 @@ function setupLayers() {
         });
     }
 
+    // ── Layer panel ──────────────────────────────────────────────────
+    // Grouped toggle list rendered into #layer-list. Each item maps a
+    // user-facing label to one or more real Mapbox layer IDs (verified
+    // by grepping the addLayer calls above). setLayer(key, on) flips
+    // visibility and updates every counter (panel head + rail badge).
+    // (Named CC_* to avoid colliding with legacy CC_LAYER_GROUPS in the
+    //  buildSidebar() block higher up — that code is dead in the new
+    //  shell but its declarations are still in scope.)
+    const CC_LAYER_GROUPS = [
+        { group: 'ATMOSPHERIC', items: [
+            { key: 'nws',       label: 'NWS Warnings',     layerIds: ['warnings-fill','warnings-outline'], defaultOn: true  },
+            { key: 'spc',       label: 'SPC Outlook',      layerIds: ['spc-fill','spc-outline'],           defaultOn: false },
+            { key: 'nhc',       label: 'Hurricane Track',  layerIds: ['storm-cone','storm-cone-outline','storm-track'], defaultOn: false },
+            { key: 'lightning', label: 'Lightning',        layerIds: ['lightning-strikes'],                defaultOn: false },
+            { key: 'nexrad',    label: 'Radar (NEXRAD)',   layerIds: ['nexrad-layer'],                     defaultOn: false },
+            { key: 'goes',      label: 'Satellite IR',     layerIds: ['goes-ir-layer'],                    defaultOn: false },
+        ]},
+        { group: 'GEOLOGICAL', items: [
+            { key: 'usgs',      label: 'Earthquakes',      layerIds: ['eq-circles'],                       defaultOn: false },
+            { key: 'volcanoes', label: 'Volcanoes',        layerIds: ['volcano-circles'],                  defaultOn: false },
+        ]},
+        { group: 'WILDFIRE', items: [
+            { key: 'firms',     label: 'Fire Detections',  layerIds: ['fire-points'],                      defaultOn: false },
+            { key: 'perim',     label: 'Fire Perimeters',  layerIds: ['fire-perimeter-fill','fire-perimeter-outline'], defaultOn: false },
+        ]},
+        { group: 'HYDROLOGICAL', items: [
+            { key: 'river',     label: 'River Gauges',     layerIds: ['river-gauges'],                     defaultOn: false },
+            { key: 'drought',   label: 'Drought',          layerIds: ['drought-fill'],                     defaultOn: false },
+        ]},
+        { group: 'RESPONSE', items: [
+            { key: 'counties',  label: 'Affected Counties', layerIds: ['counties-fill','counties-outline'], defaultOn: false },
+            { key: 'fema',      label: 'FEMA Disasters',   layerIds: ['fema-disasters'],                   defaultOn: false },
+            { key: 'shelters',  label: 'Open Shelters',    layerIds: ['shelter-circles'],                  defaultOn: false },
+            { key: 'infra',     label: 'Infrastructure',   layerIds: ['infra-at-risk','infra-normal','infra-labels'], defaultOn: false },
+        ]},
+        { group: 'ENVIRONMENTAL', items: [
+            { key: 'airnow',    label: 'Air Quality',      layerIds: ['aqi-circles'],                      defaultOn: false },
+        ]},
+    ];
+    const CC_ALL_ITEMS = CC_LAYER_GROUPS.flatMap(g => g.items);
+
+    function _setLayer(key, on) {
+        const item = CC_ALL_ITEMS.find(i => i.key === key);
+        if (!item) return;
+        for (const id of item.layerIds) {
+            if (!map.getLayer(id)) continue;
+            map.setLayoutProperty(id, 'visibility', on ? 'visible' : 'none');
+        }
+        // Refresh panel UI for this row + the counters.
+        const row = document.querySelector(`.layer-row[data-key="${key}"]`);
+        if (row && typeof row.classList !== 'undefined') {
+            row.classList.toggle('on', !!on);
+            const t = row.querySelector('.layer-toggle');
+            if (t && typeof t.classList !== 'undefined') t.classList.toggle('on', !!on);
+        }
+        _refreshLayerCounts();
+    }
+
+    function _refreshLayerCounts() {
+        let on = 0;
+        for (const item of CC_ALL_ITEMS) {
+            const id = item.layerIds.find(x => map.getLayer(x));
+            if (id && map.getLayoutProperty(id, 'visibility') !== 'none') on++;
+        }
+        const total = CC_ALL_ITEMS.length;
+        const onEl    = document.getElementById('layer-on-count');
+        const totalEl = document.getElementById('layer-total-count');
+        const railEl  = document.getElementById('layer-count-val');
+        if (onEl    && typeof onEl.textContent    !== 'undefined') onEl.textContent    = on;
+        if (totalEl && typeof totalEl.textContent !== 'undefined') totalEl.textContent = total;
+        if (railEl  && typeof railEl.textContent  !== 'undefined') railEl.textContent  = on;
+    }
+
+    function _renderLayerPanel() {
+        const host = document.getElementById('layer-list');
+        if (!host || typeof host.innerHTML === 'undefined') return;
+        host.innerHTML = CC_LAYER_GROUPS.map(g => `
+            <div class="layer-group">${g.group}</div>
+            ${g.items.map(it => `
+                <div class="layer-row${it.defaultOn ? ' on' : ''}" data-key="${it.key}">
+                    <span class="layer-toggle${it.defaultOn ? ' on' : ''}"><span class="dot"></span></span>
+                    <span class="layer-label">${it.label}</span>
+                    <span class="layer-count" data-count-for="${it.key}"></span>
+                </div>
+            `).join('')}
+        `).join('');
+        // Wire clicks
+        host.querySelectorAll('.layer-row').forEach(row => {
+            row.addEventListener('click', () => {
+                const key = row.getAttribute('data-key');
+                const item = CC_ALL_ITEMS.find(i => i.key === key);
+                if (!item) return;
+                const id = item.layerIds.find(x => map.getLayer(x));
+                const cur = id ? map.getLayoutProperty(id, 'visibility') : 'none';
+                const turningOn = cur === 'none';
+                _setLayer(key, turningOn);
+                // Lazy-fetch sources that aren't part of the auto-refresh loop.
+                // Infrastructure hits Overpass and can take 15-20s, so we only
+                // load it the first time the user actually toggles it on.
+                if (turningOn && key === 'infra' && !window._srcData['infrastructure']) {
+                    fetchSource('infrastructure', true);
+                }
+            });
+        });
+        _refreshLayerCounts();
+    }
+
+    // /api source name → layer-panel key (count-badge update routing)
+    const SOURCE_TO_KEY = {
+        warnings:        'nws',
+        spc:             'spc',
+        earthquakes:     'usgs',
+        fires:           'firms',
+        counties:        'counties',
+        lightning:       'lightning',
+        fire_perimeters: 'perim',
+        storms:          'nhc',
+        fema_disasters:  'fema',
+        river_gauges:    'river',
+        volcanoes:       'volcanoes',
+        drought:         'drought',
+        shelters:        'shelters',
+        air_quality:     'airnow',
+        infrastructure:  'infra',
+    };
+
+    document.addEventListener('hazardSource', (e) => {
+        const detail = e && e.detail; if (!detail) return;
+        const key = SOURCE_TO_KEY[detail.srcName];
+        if (!key) return;
+        const span = document.querySelector(`[data-count-for="${key}"]`);
+        if (!span || typeof span.textContent === 'undefined') return;
+        const d = detail.data;
+        // Most sources are GeoJSON FeatureCollections; storms is a list.
+        const n = (d && Array.isArray(d.features)) ? d.features.length
+                : Array.isArray(d)                  ? d.length
+                : 0;
+        span.textContent = n ? `n=${n}` : '';
+    });
+
+    // Render the panel after layers are in place. Call at the end of
+    // setupLayers so getLayer() resolves; map.on('idle') will keep the
+    // rail badge fresh when visibilities change from elsewhere.
+    _renderLayerPanel();
+
     // ── Command Center bindings ───────────────────────────────────────
     // Populates: KPI strip ([data-kpi]), priority queue (#queue-list),
     // live feed (#feed-list), ops clock + sync subline, and refreshes
@@ -1525,8 +1677,18 @@ function setupLayers() {
         }
     }
 
-    let _prevSummary = null;
-    let _dataLoaded  = false;
+    // (_prevSummary + _dataLoaded already declared higher in this scope)
+    // Source list refreshed every loadData tick (Infrastructure stays out —
+    // it's lazy on first toggle because Overpass is slow).
+    const REFRESH_SOURCES = ['warnings','spc','earthquakes','fires','counties',
+        'lightning','fire_perimeters','storms','fema_disasters','river_gauges',
+        'volcanoes','drought','shelters','air_quality'];
+
+    function _refreshAllSources() {
+        if (typeof fetchSource !== 'function') return;
+        if (_searchContext !== null) return;  // buffer search active — don't clobber filtered data
+        REFRESH_SOURCES.forEach(src => fetchSource(src, true));
+    }
 
     function loadData() {
         fetch('/api/summary').then(r => r.json()).then(data => {
@@ -1547,27 +1709,41 @@ function setupLayers() {
             _renderClock(data.last_update);
             _renderQueue(s.affected_counties || []);
 
-            // Refresh map sources via existing pipeline (declared in setupLayers scope).
-            if (map.loaded() && _searchContext === null && typeof fetchSource === 'function') {
-                ['warnings','spc','earthquakes','fires','counties','lightning',
-                 'fire_perimeters','storms','fema_disasters','river_gauges',
-                 'volcanoes','drought','shelters','air_quality']
-                    .forEach(src => fetchSource(src, true));
+            // Always refresh sources — drop the map.loaded guard. fetchSource
+            // is safe to call before sources are added (setData skips when the
+            // source isn't present); waiting for map.loaded was making us miss
+            // the post-cold-start window.
+            _refreshAllSources();
+
+            // Stale-data catch-up: if /api/summary says we have N affected
+            // counties but the cached counties source has fewer, re-fetch
+            // counties on the next tick. (The 5-min interval is too long to
+            // wait when the user just hard-refreshed during run_update.)
+            const want = (s.affected_counties || []).length;
+            const have = window._srcData?.counties?.features?.length ?? 0;
+            if (want > 0 && have < want) {
+                setTimeout(() => fetchSource('counties', true), 1500);
             }
 
-            // Live feed comes from /api/events (added in the previous commit).
+            // Live feed from /api/events.
             fetch('/api/events').then(r => r.json()).then(d => {
                 _renderFeed((d && d.events) || []);
             }).catch(() => { /* silent */ });
 
-            // Retry quickly if backend has zero data (cold start).
+            // First-load follow-up: hit loadData again at 30s and 60s so a
+            // user who hard-refreshed during the server's first run_update
+            // doesn't sit on stale empty sources for 5 minutes.
             const hasAny = (s.warnings_count > 0 || s.earthquakes > 0 || s.wildfires > 0
                             || s.river_gauges > 0 || s.spc_zones > 0);
-            if (!hasAny && !_dataLoaded) {
-                setTimeout(loadData, 10000);
-                return;
+            if (!_dataLoaded) {
+                _dataLoaded = true;
+                setTimeout(loadData, 30000);
+                setTimeout(loadData, 60000);
             }
-            _dataLoaded = true;
+            if (!hasAny) {
+                // Cold start with literally nothing — short retry.
+                setTimeout(loadData, 10000);
+            }
         }).catch(err => {
             console.warn('loadData failed, retry in 10s:', err);
             setTimeout(loadData, 10000);
@@ -1577,17 +1753,10 @@ function setupLayers() {
     // Ops-clock tick (independent of API refresh — keeps the seconds moving).
     setInterval(() => _renderClock(_prevSummary && _prevSummary._last_update), 1000);
 
-    // Update layer-count badge whenever a layer's visibility flips.
-    map.on('idle', () => {
-        const badge = document.getElementById('layer-count-val');
-        if (!badge || typeof badge.textContent === 'undefined') return;
-        try {
-            const layers = (map.getStyle().layers || [])
-                .filter(l => l.id && !l.id.startsWith('mapbox-')
-                          && l.layout && l.layout.visibility !== 'none');
-            badge.textContent = String(layers.length);
-        } catch (e) { /* swallow */ }
-    });
+    // Layer-count badge is kept in sync inside _refreshLayerCounts() —
+    // counting only our user-facing CC_LAYER_GROUPS items, not Mapbox
+    // basemap layers (water, roads, building, etc).
+    map.on('idle', _refreshLayerCounts);
 
     // Initial load + 5-minute refresh.
     loadData();

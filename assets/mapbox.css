@@ -44,7 +44,7 @@
     --radius-lg: 12px;
 
     --rail-h:  56px;
-    --kpi-h:   58px;
+    --kpi-h:   86px;
     --gap:     8px;
 }
 
@@ -63,7 +63,9 @@ body {
     font-size: 12.5px;
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
+    display: flex; flex-direction: column;
 }
+#top-rail, #kpi-strip { flex-shrink: 0; }
 input, textarea, select { font-size: 16px; font-family: inherit; }
 button { cursor: pointer; font-family: inherit; }
 
@@ -115,7 +117,8 @@ button { cursor: pointer; font-family: inherit; }
     padding: 10px 16px;
     border-bottom: 1px solid var(--ink-3);
     background: var(--ink-0);
-    height: var(--kpi-h);
+    min-height: var(--kpi-h);
+    flex-shrink: 0;
 }
 .kpi {
     flex: 1; min-width: 0;
@@ -123,8 +126,9 @@ button { cursor: pointer; font-family: inherit; }
     border: 1px solid var(--ink-3);
     border-left: 2px solid var(--ink-5);
     border-radius: var(--radius);
-    padding: 8px 12px;
+    padding: 10px 12px 12px;
     overflow: hidden;
+    display: flex; flex-direction: column; justify-content: center;
 }
 .kpi.big { flex: 1.3; }
 .kpi[data-sev="extreme"]  { border-left-color: var(--sev-extreme); }
@@ -148,12 +152,12 @@ button { cursor: pointer; font-family: inherit; }
 
 /* ─────────── MAIN GRID ─────────── */
 #main-grid {
-    flex: 1; min-height: 0;
+    flex: 1 1 auto; min-height: 0;
     display: grid;
     grid-template-columns: 320px 1fr 340px;
     gap: var(--gap);
     padding: var(--gap);
-    height: calc(100vh - var(--rail-h) - var(--kpi-h));
+    overflow: hidden;
 }
 .col {
     display: flex; flex-direction: column; gap: var(--gap);

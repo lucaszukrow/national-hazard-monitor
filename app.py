@@ -2207,11 +2207,15 @@ def mapbox_map():
 # Endpoint name 'mapbox_assets' matches the url_for() call in the template.
 @app.server.route("/assets/<path:filename>", endpoint="mapbox_assets")
 def mapbox_assets(filename):
-    return flask_module.send_from_directory(
+    # max_age=0 during the redesign so iterating CSS/JS doesn't fight the
+    # browser cache. Bump back up (e.g. 300) once PR 2 ships.
+    resp = flask_module.send_from_directory(
         os.path.join(os.path.dirname(__file__) or ".", "assets"),
         filename,
-        max_age=300,
+        max_age=0,
     )
+    resp.headers["Cache-Control"] = "no-store, must-revalidate"
+    return resp
 
 
 app.layout = html.Div(
