@@ -1725,7 +1725,9 @@ function setupLayers() {
             </div>`;
             return;
         }
-        host.innerHTML = list.slice(0, 6).map(c => `
+        // Show ALL contributing hazards. CSS .contributing-list scrolls
+        // when the list overflows the panel.
+        host.innerHTML = list.map(c => `
             <div class="c-row">
                 <span class="c-dot sev-${c.sev}"></span>
                 <span class="c-name">${c.label}</span>
@@ -1772,6 +1774,25 @@ function setupLayers() {
             const el = document.createElement('div');
             el.style.cssText = 'width:14px;height:14px;background:var(--accent);border:3px solid #fff;border-radius:50%;box-shadow:0 0 16px var(--accent);';
             _searchMarker = new mapboxgl.Marker(el).setLngLat([lng, lat]).addTo(map);
+
+            // Auto-enable point/circle hazard layers so the user SEES the
+            // hazards inside the buffer that the threat score is based on.
+            // Only enable layers that have data — don't clutter with empties.
+            const AUTO_ON_KEYS = ['usgs','firms','perim','river','lightning','fema','volcanoes'];
+            for (const key of AUTO_ON_KEYS) {
+                const item = (window.CC_ALL_ITEMS_REF || []).find(i => i.key === key);
+                if (!item) continue;
+                const id = item.layerIds.find(x => map.getLayer(x));
+                if (!id) continue;
+                // Only flip on if the source has features (>0)
+                const layer = map.getLayer(id);
+                const srcName = layer && layer.source;
+                const srcData = srcName && window._srcData[srcName];
+                const n = srcData?.features?.length ?? (Array.isArray(srcData) ? srcData.length : 0);
+                if (n > 0 && typeof window._setLayerRef === 'function') {
+                    window._setLayerRef(key, true);
+                }
+            }
 
             // Buffer circle
             try {

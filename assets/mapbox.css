@@ -427,7 +427,17 @@ button { cursor: pointer; font-family: inherit; }
 .threat-bar .seg.mid { background: var(--sev-moderate); }
 .threat-bar .seg.hi  { background: var(--sev-extreme); }
 
-.contributing-list { margin-top: 10px; }
+.contributing-list {
+    margin-top: 10px;
+    max-height: 220px;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    /* hide scrollbar but allow scroll — webkit thumb styled like .scroll */
+}
+.contributing-list::-webkit-scrollbar { width: 5px; }
+.contributing-list::-webkit-scrollbar-track { background: transparent; }
+.contributing-list::-webkit-scrollbar-thumb { background: var(--ink-3); border-radius: 3px; }
+.contributing-list::-webkit-scrollbar-thumb:hover { background: var(--ink-4); }
 .c-row {
     display: flex; align-items: center; gap: 8px;
     padding: 5px 0;
