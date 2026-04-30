@@ -1775,18 +1775,29 @@ function setupLayers() {
             el.style.cssText = 'width:14px;height:14px;background:var(--accent);border:3px solid #fff;border-radius:50%;box-shadow:0 0 16px var(--accent);';
             _searchMarker = new mapboxgl.Marker(el).setLngLat([lng, lat]).addTo(map);
 
-            // Auto-enable point/circle hazard layers so the user SEES the
-            // hazards inside the buffer that the threat score is based on.
-            // Only enable layers that have data — don't clutter with empties.
-            const AUTO_ON_KEYS = ['usgs','firms','perim','river','lightning','fema','volcanoes'];
+            // Filter every hazard source to ONLY features that intersect the
+            // buffer, then auto-enable the layers that still have data after
+            // filtering. The original full-CONUS data is stashed on
+            // window._unfilteredData so clearing the search restores it.
+            try {
+                const buffer = turf.circle(turf.point([lng, lat]), radius * 1.60934,
+                                           { steps: 64, units: 'kilometers' });
+                _filterSourcesToBuffer(buffer, radius, lng, lat);
+            } catch (e) { console.warn('buffer filter:', e); }
+
+            // Stash search context so loadData() stops clobbering filtered
+            // sources on its 5-min refresh tick (see _refreshAllSources).
+            _searchContext = { lng, lat, radius, place };
+
+            // Auto-enable point/polygon hazard layers that still have data
+            // after the in-buffer filter — silent if a layer ended up empty.
+            const AUTO_ON_KEYS = ['nws','spc','usgs','firms','perim','river','lightning','fema','volcanoes','drought','airnow','shelters','counties'];
             for (const key of AUTO_ON_KEYS) {
                 const item = (window.CC_ALL_ITEMS_REF || []).find(i => i.key === key);
                 if (!item) continue;
                 const id = item.layerIds.find(x => map.getLayer(x));
                 if (!id) continue;
-                // Only flip on if the source has features (>0)
-                const layer = map.getLayer(id);
-                const srcName = layer && layer.source;
+                const srcName = map.getLayer(id)?.source;
                 const srcData = srcName && window._srcData[srcName];
                 const n = srcData?.features?.length ?? (Array.isArray(srcData) ? srcData.length : 0);
                 if (n > 0 && typeof window._setLayerRef === 'function') {
