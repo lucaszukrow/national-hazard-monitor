@@ -282,8 +282,22 @@ function showPopup(title, rows, e) {
 }
 
 function setupLayers() {
-    // Guard: don't add sources if already added
-    if (map.getSource('warnings')) return;
+    // Re-runnable: map.setStyle() wipes all sources/layers, so we re-add them
+    // when the user clicks a base style toggle (DARK / SAT / STREETS).
+    // Event listeners (map.on click/hover) PERSIST across setStyle, so we
+    // stub map.on + window.setInterval during a re-run to avoid duplicates.
+    const isReRun = !!window._ccSetupOnce;
+    if (map.getSource('warnings') && !isReRun) return;
+    window._ccSetupOnce = true;
+
+    const __origSetInterval = window.setInterval;
+    const __origMapOn       = map.on;
+    if (isReRun) {
+        window.setInterval = function () { return 0; };
+        map.on             = function () { return map; };
+    }
+
+    try {
 
     // 3D terrain removed — was forcing full 3D render mode on every frame
 
@@ -1544,10 +1558,340 @@ function setupLayers() {
         span.textContent = n ? `n=${n}` : '';
     });
 
+    // Expose to top-level scope so _switchBase() can restore layer state
+    // after a base-style swap (which lives outside setupLayers).
+    window.CC_ALL_ITEMS_REF = CC_ALL_ITEMS;
+    window._setLayerRef     = _setLayer;
+
     // Render the panel after layers are in place. Call at the end of
     // setupLayers so getLayer() resolves; map.on('idle') will keep the
     // rail badge fresh when visibilities change from elsewhere.
     _renderLayerPanel();
+
+    // ── Step 8 — Location threat analysis ───────────────────────────
+    // Geocode the address, drop a buffer circle, walk every cached
+    // hazard source within radius, sum severity-weighted distance-decay
+    // contributions → live score + contributing factors. NRI panel pulls
+    // long-term FEMA risk for the resolved county.
+    let _locState = null;  // { lng, lat, radius, place, county, state, threats[], score, level }
+
+    function _milesBetween(lat1, lng1, lat2, lng2) {
+        const R = 3958.8;
+        const toRad = d => d * Math.PI / 180;
+        const dLat = toRad(lat2 - lat1), dLng = toRad(lng2 - lng1);
+        const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng/2)**2;
+        return 2 * R * Math.asin(Math.sqrt(a));
+    }
+
+    function _featureCenter(feat) {
+        try { return turf.centerOfMass(feat).geometry.coordinates; }
+        catch (e) { return feat?.geometry?.coordinates; }
+    }
+
+    function _calculateThreat(lng, lat, radiusMi) {
+        // Walk every cached source, compute per-feature contribution.
+        // Reuses module-level THREAT_WEIGHTS + distanceDecay (declared
+        // at the bottom of this file).
+        const contrib = [];
+        const push = (sev, label, dist, weight) => {
+            const decay = distanceDecay(dist, radiusMi);
+            const pts   = Math.round(weight * decay);
+            if (pts > 0) contrib.push({ sev, label, dist: dist.toFixed(1) + ' mi', weight: pts });
+        };
+
+        // NWS warnings (polygon — use centroid for distance)
+        for (const f of (window._srcData?.warnings?.features || [])) {
+            const c = _featureCenter(f); if (!c) continue;
+            const d = _milesBetween(lat, lng, c[1], c[0]);
+            if (d > radiusMi * 1.5) continue;
+            const p = f.properties || {};
+            const phenom = String(p.phenom || '').toUpperCase();
+            const sig    = String(p.sig    || '').toUpperCase();
+            let w = THREAT_WEIGHTS.other_warning, sev = 'moderate', label = phenom;
+            if (phenom === 'TO' && sig === 'W')     { w = THREAT_WEIGHTS.tornado_warning;   sev = 'extreme'; label = 'Tornado Warning'; }
+            else if (phenom === 'HU')               { w = THREAT_WEIGHTS.hurricane_warning; sev = 'extreme'; label = 'Hurricane'; }
+            else if (phenom === 'FF')               { w = THREAT_WEIGHTS.flash_flood;       sev = 'severe';  label = 'Flash Flood'; }
+            else if (phenom === 'FA')               { w = THREAT_WEIGHTS.flood_warning;     sev = 'moderate';label = 'Flood Warning'; }
+            else if (phenom === 'SV')               { w = THREAT_WEIGHTS.severe_tstorm;     sev = 'severe';  label = 'Severe T-Storm'; }
+            else if (phenom === 'WS')               { w = THREAT_WEIGHTS.winter_storm;      sev = 'moderate';label = 'Winter Storm'; }
+            else if (phenom === 'FW')               { w = THREAT_WEIGHTS.other_warning + 5; sev = 'severe';  label = 'Fire Weather'; }
+            push(sev, label, d, w);
+        }
+        // USGS earthquakes
+        for (const f of (window._srcData?.earthquakes?.features || [])) {
+            const c = f?.geometry?.coordinates; if (!c) continue;
+            const d = _milesBetween(lat, lng, c[1], c[0]);
+            if (d > radiusMi * 1.5) continue;
+            const mag = +(f.properties?.mag || 0);
+            const w = mag >= 5 ? THREAT_WEIGHTS.earthquake_m5
+                    : mag >= 4 ? THREAT_WEIGHTS.earthquake_m4
+                    :            THREAT_WEIGHTS.earthquake_m3;
+            const sev = mag >= 5 ? 'extreme' : mag >= 4 ? 'severe' : 'moderate';
+            push(sev, `M${mag.toFixed(1)} earthquake`, d, w);
+        }
+        // FIRMS fires
+        for (const f of (window._srcData?.fires?.features || [])) {
+            const c = f?.geometry?.coordinates; if (!c) continue;
+            const d = _milesBetween(lat, lng, c[1], c[0]);
+            if (d > radiusMi * 1.5) continue;
+            push('severe', 'Fire detection', d, THREAT_WEIGHTS.wildfire_near);
+        }
+        // Fire perimeters
+        for (const f of (window._srcData?.fire_perimeters?.features || [])) {
+            const c = _featureCenter(f); if (!c) continue;
+            const d = _milesBetween(lat, lng, c[1], c[0]);
+            if (d > radiusMi * 1.5) continue;
+            push('extreme', 'Active fire perimeter', d, THREAT_WEIGHTS.fire_perimeter);
+        }
+        // River gauges
+        for (const f of (window._srcData?.river_gauges?.features || [])) {
+            const c = f?.geometry?.coordinates; if (!c) continue;
+            const d = _milesBetween(lat, lng, c[1], c[0]);
+            if (d > radiusMi * 1.5) continue;
+            const status = String(f.properties?.status || '').toLowerCase();
+            const w = ({ major: THREAT_WEIGHTS.flood_gauge_major,
+                         moderate: THREAT_WEIGHTS.flood_gauge_moderate,
+                         minor: THREAT_WEIGHTS.flood_gauge_minor,
+                         action: THREAT_WEIGHTS.flood_gauge_action })[status] || 4;
+            const sev = ({ major:'extreme', moderate:'severe', minor:'moderate', action:'minor' })[status] || 'info';
+            push(sev, `${status[0].toUpperCase() + status.slice(1)} flood stage`, d, w);
+        }
+        // Lightning storm reports
+        for (const f of (window._srcData?.lightning?.features || [])) {
+            const c = f?.geometry?.coordinates; if (!c) continue;
+            const d = _milesBetween(lat, lng, c[1], c[0]);
+            if (d > radiusMi * 1.5) continue;
+            push('moderate', 'Storm report', d, THREAT_WEIGHTS.storm_report);
+        }
+        const score = Math.min(100, contrib.reduce((s, c) => s + c.weight, 0));
+        contrib.sort((a, b) => b.weight - a.weight);
+        return { score, contrib };
+    }
+
+    function _scoreToTier(score) {
+        if (score >= 75) return { label: 'EXTREME',  sev: 'extreme'  };
+        if (score >= 55) return { label: 'SEVERE',   sev: 'severe'   };
+        if (score >= 35) return { label: 'HIGH',     sev: 'moderate' };
+        if (score >= 15) return { label: 'ELEVATED', sev: 'minor'    };
+        return                  { label: 'LOW',      sev: 'info'     };
+    }
+
+    function _renderScores(live, nri) {
+        const liveTile = document.getElementById('score-live');
+        const nriTile  = document.getElementById('score-nri');
+        if (liveTile && typeof liveTile.className !== 'undefined') {
+            liveTile.className = 'score-tile sev-' + (live ? live.tier.sev : 'info');
+            const v = liveTile.querySelector('.score-val'),
+                  l = liveTile.querySelector('.score-label');
+            if (v) v.textContent = live ? Math.round(live.score) : '—';
+            if (l) l.textContent = live ? live.tier.label        : '—';
+        }
+        if (nriTile && typeof nriTile.className !== 'undefined') {
+            const v = nriTile.querySelector('.score-val'),
+                  l = nriTile.querySelector('.score-label');
+            if (nri) {
+                v.textContent = (nri.RISK_SCORE || 0).toFixed(1);
+                l.textContent = (nri.RISK_RATNG || '').toUpperCase() || '—';
+                nriTile.className = 'score-tile';
+            } else {
+                v.textContent = '—'; l.textContent = '—';
+            }
+        }
+    }
+
+    function _renderThreatBar(score) {
+        const host = document.getElementById('threat-bar');
+        if (!host || typeof host.innerHTML === 'undefined') return;
+        const segs = 20, filled = Math.round((score / 100) * segs);
+        const cells = [];
+        for (let i = 0; i < segs; i++) {
+            let cls = '';
+            if (i < filled) cls = i < 7 ? 'lo' : i < 14 ? 'mid' : 'hi';
+            cells.push(`<div class="seg ${cls}"></div>`);
+        }
+        host.innerHTML = cells.join('');
+    }
+
+    function _renderContributing(list) {
+        const host = document.getElementById('contributing-list');
+        if (!host || typeof host.innerHTML === 'undefined') return;
+        if (!list.length) { host.innerHTML = '<div class="empty-state">No nearby hazards.</div>'; return; }
+        host.innerHTML = list.slice(0, 6).map(c => `
+            <div class="c-row">
+                <span class="c-dot sev-${c.sev}"></span>
+                <span class="c-name">${c.label}</span>
+                <span class="c-dist">${c.dist}</span>
+                <span class="c-weight">+${c.weight}</span>
+            </div>
+        `).join('');
+    }
+
+    let _searchMarker = null;
+    let _runSearchToken = 0;
+
+    async function _runLocationAnalysis() {
+        const addr = (document.getElementById('address-input')?.value || '').trim();
+        const radius = parseInt(document.getElementById('radius-slider')?.value || '25', 10);
+        if (!addr) return;
+        const myToken = ++_runSearchToken;
+
+        try {
+            // Geocode via Mapbox API (token already on mapboxgl.accessToken)
+            const url = 'https://api.mapbox.com/geocoding/v5/mapbox.places/'
+                + encodeURIComponent(addr) + '.json?country=US&limit=1&access_token='
+                + mapboxgl.accessToken;
+            const geo = await fetch(url).then(r => r.json());
+            if (myToken !== _runSearchToken) return;  // user typed again — abort
+            const feat = geo.features?.[0];
+            if (!feat) {
+                _renderScores({score:0, tier:{label:'NOT FOUND', sev:'info'}}, null);
+                _renderThreatBar(0);
+                _renderContributing([]);
+                return;
+            }
+            const [lng, lat] = feat.center;
+            const place = feat.place_name;
+            let nriState = '', nriCounty = '';
+            for (const ctx of (feat.context || [])) {
+                if (ctx.id?.startsWith('region'))   nriState  = (ctx.short_code || '').replace('US-', '');
+                if (ctx.id?.startsWith('district')) nriCounty = ctx.text || '';
+            }
+
+            // Fly + drop marker
+            map.flyTo({ center: [lng, lat], zoom: 7, duration: 1200 });
+            if (_searchMarker) _searchMarker.remove();
+            const el = document.createElement('div');
+            el.style.cssText = 'width:14px;height:14px;background:var(--accent);border:3px solid #fff;border-radius:50%;box-shadow:0 0 16px var(--accent);';
+            _searchMarker = new mapboxgl.Marker(el).setLngLat([lng, lat]).addTo(map);
+
+            // Buffer circle
+            try {
+                const buffer = turf.circle(turf.point([lng, lat]), radius * 1.60934,
+                                           { steps: 64, units: 'kilometers' });
+                if (map.getSource('search-buffer')) {
+                    map.getSource('search-buffer').setData(buffer);
+                } else {
+                    map.addSource('search-buffer', { type: 'geojson', data: buffer });
+                    map.addLayer({ id: 'buffer-fill',    type: 'fill', source: 'search-buffer',
+                                   paint: { 'fill-color': '#5eb3ff', 'fill-opacity': 0.07 }});
+                    map.addLayer({ id: 'buffer-outline', type: 'line', source: 'search-buffer',
+                                   paint: { 'line-color': '#5eb3ff', 'line-width': 1.5,
+                                            'line-dasharray': [4, 4] }});
+                }
+            } catch (e) { /* turf failed — skip buffer */ }
+
+            // Compute live score + fetch NRI in parallel
+            const liveResult = _calculateThreat(lng, lat, radius);
+            const tier = _scoreToTier(liveResult.score);
+            const nri = await fetchNRI(nriState, nriCounty).catch(() => null);
+            if (myToken !== _runSearchToken) return;
+
+            _locState = {
+                lng, lat, radius, place, county: nriCounty, state: nriState,
+                score: liveResult.score, level: tier.label, threats: liveResult.contrib,
+            };
+            _renderScores({ score: liveResult.score, tier }, nri);
+            _renderThreatBar(liveResult.score);
+            _renderContributing(liveResult.contrib);
+        } catch (err) {
+            console.warn('Location analysis failed:', err);
+        }
+    }
+
+    // Wire address input + radius slider + Enter key
+    const addrInput   = document.getElementById('address-input');
+    const radiusInput = document.getElementById('radius-slider');
+    const radiusVal   = document.getElementById('radius-val');
+    if (addrInput && typeof addrInput.addEventListener === 'function') {
+        addrInput.addEventListener('keydown', e => {
+            if (e.key === 'Enter') { e.preventDefault(); _runLocationAnalysis(); }
+        });
+        addrInput.addEventListener('blur', () => { if (addrInput.value.trim()) _runLocationAnalysis(); });
+    }
+    if (radiusInput && typeof radiusInput.addEventListener === 'function') {
+        radiusInput.addEventListener('input', () => {
+            if (radiusVal) radiusVal.textContent = radiusInput.value + ' mi';
+        });
+        radiusInput.addEventListener('change', () => {
+            if (addrInput && addrInput.value.trim()) _runLocationAnalysis();
+        });
+    }
+
+    // ── Step 9 — Inline AI Situation Report ─────────────────────────
+    function _renderSitrep(text, isError) {
+        const host = document.getElementById('sitrep-text');
+        if (!host || typeof host.innerHTML === 'undefined') return;
+        if (isError) {
+            host.innerHTML = `<div class="empty-state" style="color:var(--sev-extreme);">${text}</div>`;
+            return;
+        }
+        // Plain text, preserve newlines via whitespace-pre-wrap (set in CSS)
+        host.textContent = text;
+    }
+
+    async function _refreshSitrep() {
+        const btn = document.getElementById('sitrep-refresh-btn');
+        if (btn && typeof btn.disabled !== 'undefined') {
+            btn.disabled = true; btn.textContent = '…';
+        }
+        _renderSitrep('Generating…');
+        try {
+            let res;
+            if (_locState && _locState.lat) {
+                // Location-aware briefing — POST scored threats so AI doesn't re-derive
+                res = await fetch('/api/sitrep', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        score: Math.round(_locState.score),
+                        threat_level: _locState.level,
+                        threats: _locState.threats.map(t => `${t.label} (${t.dist}, +${t.weight})`),
+                        county: _locState.county,
+                    }),
+                });
+            } else {
+                res = await fetch('/api/sitrep');  // national
+            }
+            const data = await res.json();
+            if (data && data.text) _renderSitrep(data.text);
+            else _renderSitrep(data?.error || 'No briefing available.', true);
+        } catch (err) {
+            _renderSitrep('Failed to generate briefing: ' + err.message, true);
+        } finally {
+            if (btn && typeof btn.disabled !== 'undefined') {
+                btn.disabled = false; btn.textContent = 'Refresh';
+            }
+        }
+    }
+
+    const sitrepBtn = document.getElementById('sitrep-refresh-btn');
+    if (sitrepBtn && typeof sitrepBtn.addEventListener === 'function') {
+        sitrepBtn.addEventListener('click', _refreshSitrep);
+    }
+
+    // ── Step 10 — Mobile bottom-sheet tabs ─────────────────────────
+    function _setMobileTab(name) {
+        document.querySelectorAll('#mobile-tabs button').forEach(b =>
+            b.classList.toggle('active', b.getAttribute('data-mobile-tab') === name));
+        document.querySelectorAll('[data-tab]').forEach(p =>
+            p.classList.toggle('mobile-active', p.getAttribute('data-tab') === name));
+    }
+    document.querySelectorAll('#mobile-tabs button').forEach(btn => {
+        btn.addEventListener('click', () => _setMobileTab(btn.getAttribute('data-mobile-tab')));
+    });
+    // Default mobile tab so something is visible on first load
+    _setMobileTab('queue');
+
+    // Resize map when entering/leaving mobile so Mapbox doesn't get stuck at
+    // the wrong canvas size after the layout breakpoint flips.
+    let _wasMobile = window.matchMedia('(max-width: 768px)').matches;
+    window.addEventListener('resize', () => {
+        const isMobile = window.matchMedia('(max-width: 768px)').matches;
+        if (isMobile !== _wasMobile) {
+            _wasMobile = isMobile;
+            setTimeout(() => map.resize(), 100);
+        }
+    });
 
     // ── Command Center bindings ───────────────────────────────────────
     // Populates: KPI strip ([data-kpi]), priority queue (#queue-list),
@@ -1761,7 +2105,46 @@ function setupLayers() {
     // Initial load + 5-minute refresh.
     loadData();
     setInterval(loadData, 5 * 60 * 1000);
+
+    } finally {
+        if (isReRun) {
+            window.setInterval = __origSetInterval;
+            map.on             = __origMapOn;
+        }
+    }
 }
+
+// ── Map base style toggle (DARK / SATELLITE / STREETS) ─────────────
+const BASE_STYLES = {
+    dark:      'mapbox://styles/mapbox/dark-v11',
+    satellite: 'mapbox://styles/mapbox/satellite-streets-v12',
+    streets:   'mapbox://styles/mapbox/streets-v12',
+};
+function _switchBase(name) {
+    const url = BASE_STYLES[name]; if (!url) return;
+    // Snapshot visibility per layer key so toggle state survives the swap.
+    const savedVis = {};
+    for (const item of (window.CC_ALL_ITEMS_REF || [])) {
+        const id = item.layerIds.find(x => map.getLayer(x));
+        savedVis[item.key] = id ? (map.getLayoutProperty(id, 'visibility') || 'visible') : 'none';
+    }
+    map.once('style.load', () => {
+        setupLayers();  // re-adds sources + layers (stubbed timers/handlers)
+        // Restore previous visibilities + UI state
+        for (const [key, vis] of Object.entries(savedVis)) {
+            if (typeof window._setLayerRef === 'function') {
+                window._setLayerRef(key, vis !== 'none');
+            }
+        }
+    });
+    map.setStyle(url);
+    document.querySelectorAll('.map-base-toggle button').forEach(b => {
+        b.classList.toggle('active', b.getAttribute('data-base') === name);
+    });
+}
+document.querySelectorAll('.map-base-toggle button').forEach(btn => {
+    btn.addEventListener('click', () => _switchBase(btn.getAttribute('data-base')));
+});
 
 // Use exact Mapbox recommended pattern
 map.on('load', function() {

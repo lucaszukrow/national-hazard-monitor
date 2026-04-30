@@ -82,14 +82,14 @@
 
     <!-- COL 1 ─ left -->
     <section class="col col-left">
-        <div class="panel panel-grow">
+        <div class="panel panel-grow" data-tab="layers">
             <div class="panel-head">
                 <div class="panel-title">DATA LAYERS</div>
                 <div class="panel-meta mono"><span id="layer-on-count">0</span> of <span id="layer-total-count">0</span> on</div>
             </div>
             <div class="panel-body scroll" id="layer-list"></div>
         </div>
-        <div class="panel panel-grow">
+        <div class="panel panel-grow" data-tab="queue">
             <div class="panel-head">
                 <div class="panel-title">PRIORITY QUEUE</div>
                 <div class="panel-meta mono" id="queue-meta">— events</div>
@@ -134,7 +134,7 @@
 
     <!-- COL 3 ─ right -->
     <section class="col col-right">
-        <div class="panel">
+        <div class="panel" data-tab="analyze">
             <div class="panel-head">
                 <div class="panel-title">LOCATION ANALYSIS</div>
                 <div class="panel-meta mono">real-time + NRI</div>
@@ -166,7 +166,7 @@
             </div>
         </div>
 
-        <div class="panel">
+        <div class="panel" data-tab="sitrep">
             <div class="panel-head">
                 <div class="panel-title">AI SITUATION REPORT</div>
                 <div class="panel-meta mono">Groq · llama-3.3</div>
@@ -175,7 +175,7 @@
             <div class="panel-body scroll" id="sitrep-text">Press <strong>Refresh</strong> to generate a national briefing.</div>
         </div>
 
-        <div class="panel">
+        <div class="panel" data-tab="feed">
             <div class="panel-head">
                 <div class="panel-title">LIVE FEED</div>
                 <div class="panel-meta mono">streaming</div>
@@ -186,6 +186,15 @@
         </div>
     </section>
 </main>
+
+<!-- Mobile bottom-sheet tabs (hidden on desktop via CSS) -->
+<nav id="mobile-tabs" aria-label="Panel selector">
+    <button data-mobile-tab="queue"   class="active" type="button">Queue</button>
+    <button data-mobile-tab="layers"  type="button">Layers</button>
+    <button data-mobile-tab="analyze" type="button">Analyze</button>
+    <button data-mobile-tab="sitrep"  type="button">Brief</button>
+    <button data-mobile-tab="feed"    type="button">Feed</button>
+</nav>
 
 <!-- Hazard click popup (kept for existing map click handlers) -->
 <div id="popup">

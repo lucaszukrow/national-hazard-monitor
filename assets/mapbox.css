@@ -481,9 +481,95 @@ button { cursor: pointer; font-family: inherit; }
 .popup-key { color: var(--ink-6); font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; }
 .popup-val { color: var(--ink-9); font-family: 'JetBrains Mono', monospace; font-size: 11px; }
 
-/* ─────────── MOBILE (placeholder; full breakpoint comes in step 10) ─────────── */
+/* ─────────── MOBILE BOTTOM-SHEET TABS ─────────── */
+#mobile-tabs { display: none; }
+
 @media (max-width: 768px) {
-    #main-grid { grid-template-columns: 1fr; height: auto; }
+    /* Top rail compresses */
+    #top-rail {
+        grid-template-columns: 1fr 1fr;  /* drop the center clock column */
+        padding: 8px 12px;
+        gap: 8px;
+    }
+    .rail-center { display: none; }
+    .rail-right .rail-btn:nth-child(2) { display: none; }  /* hide Export */
+
+    /* KPI strip becomes a horizontal-scroll filmstrip */
+    #kpi-strip {
+        overflow-x: auto;
+        overflow-y: hidden;
+        padding: 8px 12px;
+        gap: 6px;
+        flex-wrap: nowrap;
+        -webkit-overflow-scrolling: touch;
+        min-height: 70px;
+    }
+    #kpi-strip::-webkit-scrollbar { display: none; }
+    .kpi {
+        flex: 0 0 auto;
+        min-width: 110px;
+        padding: 6px 10px 8px;
+    }
+    .kpi.big { flex: 0 0 auto; min-width: 130px; }
+    .kpi-val { font-size: 18px; }
+    .kpi.big .kpi-val { font-size: 20px; }
+
+    /* Map fills the visible area; left/right columns become bottom sheet */
+    #main-grid {
+        grid-template-columns: 1fr;
+        padding: 6px;
+        gap: 0;
+    }
     .col-left, .col-right { display: none; }
-    .map-panel { min-height: 60vh; }
+    .col-center { gap: 0; }
+    .map-panel { min-height: 0; flex: 1; }
+    .panel:not(.map-panel) + .panel { margin-top: 0; }
+    /* Hide the timeline panel on mobile to give the map all the space */
+    .col-center .panel:not(.map-panel) { display: none; }
+
+    /* Mobile tab bar — fixed to bottom */
+    #mobile-tabs {
+        display: flex;
+        position: fixed;
+        bottom: 0; left: 0; right: 0;
+        background: var(--ink-1);
+        border-top: 1px solid var(--ink-3);
+        padding: 4px 4px calc(4px + var(--safe-bottom)) 4px;
+        z-index: 60;
+        gap: 2px;
+    }
+    #mobile-tabs button {
+        flex: 1;
+        background: transparent;
+        border: 1px solid transparent;
+        color: var(--ink-6);
+        font-size: 10px;
+        font-family: 'JetBrains Mono', monospace;
+        letter-spacing: 0.06em;
+        padding: 8px 4px;
+        border-radius: var(--radius-sm);
+        text-transform: uppercase;
+    }
+    #mobile-tabs button.active {
+        background: color-mix(in oklab, var(--accent) 14%, var(--ink-2));
+        border-color: color-mix(in oklab, var(--accent) 50%, transparent);
+        color: var(--ink-9);
+    }
+
+    /* On mobile, hide every data-tab panel by default — only the one with
+       .mobile-active class becomes a fixed bottom sheet above the tab bar. */
+    [data-tab] { display: none !important; }
+    [data-tab].mobile-active {
+        display: flex !important;
+        position: fixed;
+        left: 0; right: 0; bottom: 52px;  /* above tab bar */
+        max-height: 55vh;
+        z-index: 59;
+        border-radius: 0;
+        border-left: none; border-right: none; border-bottom: none;
+        background: var(--ink-1);
+        box-shadow: 0 -8px 24px rgba(0,0,0,0.5);
+    }
+    /* Reveal the parent col so the absolutely-positioned panel is rendered */
+    .col-left, .col-right { display: contents; }
 }
