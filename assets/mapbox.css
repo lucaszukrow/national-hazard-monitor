@@ -372,8 +372,33 @@ button { cursor: pointer; font-family: inherit; }
     display: flex; align-items: center; gap: 10px; margin-top: 8px;
 }
 .radius-row .kicker { width: 50px; flex-shrink: 0; }
-#radius-slider { flex: 1; accent-color: var(--accent); }
-#radius-val { font-size: 11px; color: var(--ink-8); width: 50px; text-align: right; }
+#radius-slider {
+    flex: 1;
+    accent-color: #5eb3ff;
+    -webkit-appearance: none;
+    appearance: none;
+    height: 4px;
+    background: linear-gradient(90deg, #5eb3ff var(--rs-fill, 25%), var(--ink-4) var(--rs-fill, 25%));
+    border-radius: 2px;
+    outline: none;
+    cursor: pointer;
+}
+#radius-slider::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 14px; height: 14px; border-radius: 50%;
+    background: #5eb3ff;
+    border: 2px solid var(--ink-1);
+    box-shadow: 0 0 8px rgba(94, 179, 255, 0.6);
+    cursor: pointer;
+}
+#radius-slider::-moz-range-thumb {
+    width: 14px; height: 14px; border-radius: 50%;
+    background: #5eb3ff;
+    border: 2px solid var(--ink-1);
+    box-shadow: 0 0 8px rgba(94, 179, 255, 0.6);
+    cursor: pointer;
+}
+#radius-val { font-size: 11px; color: #5eb3ff; width: 50px; text-align: right; font-weight: 500; }
 
 .score-row { display: flex; gap: 8px; margin-top: 12px; }
 .score-tile {

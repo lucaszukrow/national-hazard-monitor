@@ -1555,7 +1555,10 @@ function setupLayers() {
         const n = (d && Array.isArray(d.features)) ? d.features.length
                 : Array.isArray(d)                  ? d.length
                 : 0;
-        span.textContent = n ? `n=${n}` : '';
+        // Always show n=N (even 0) so the user knows the toggle isn't broken
+        // — empty just means there's nothing to display right now.
+        span.textContent = `n=${n}`;
+        span.style.opacity = n === 0 ? '0.45' : '1';
     });
 
     // Expose to top-level scope so _switchBase() can restore layer state
@@ -1712,10 +1715,16 @@ function setupLayers() {
         host.innerHTML = cells.join('');
     }
 
-    function _renderContributing(list) {
+    function _renderContributing(list, radiusMi) {
         const host = document.getElementById('contributing-list');
         if (!host || typeof host.innerHTML === 'undefined') return;
-        if (!list.length) { host.innerHTML = '<div class="empty-state">No nearby hazards.</div>'; return; }
+        if (!list.length) {
+            host.innerHTML = `<div class="empty-state">
+                No active hazards within ${radiusMi || 50} mi.<br>
+                <span style="font-size:10px;opacity:0.7;">Drag the slider wider to scan further.</span>
+            </div>`;
+            return;
+        }
         host.innerHTML = list.slice(0, 6).map(c => `
             <div class="c-row">
                 <span class="c-dot sev-${c.sev}"></span>
@@ -1746,7 +1755,7 @@ function setupLayers() {
             if (!feat) {
                 _renderScores({score:0, tier:{label:'NOT FOUND', sev:'info'}}, null);
                 _renderThreatBar(0);
-                _renderContributing([]);
+                _renderContributing([], radius);
                 return;
             }
             const [lng, lat] = feat.center;
@@ -1792,7 +1801,7 @@ function setupLayers() {
             };
             _renderScores({ score: liveResult.score, tier }, nri);
             _renderThreatBar(liveResult.score);
-            _renderContributing(liveResult.contrib);
+            _renderContributing(liveResult.contrib, radius);
         } catch (err) {
             console.warn('Location analysis failed:', err);
         }
@@ -1808,13 +1817,22 @@ function setupLayers() {
         });
         addrInput.addEventListener('blur', () => { if (addrInput.value.trim()) _runLocationAnalysis(); });
     }
+    function _paintRadiusFill() {
+        if (!radiusInput) return;
+        const min = +radiusInput.min || 5;
+        const max = +radiusInput.max || 100;
+        const pct = ((+radiusInput.value - min) / (max - min)) * 100;
+        radiusInput.style.setProperty('--rs-fill', pct + '%');
+    }
     if (radiusInput && typeof radiusInput.addEventListener === 'function') {
         radiusInput.addEventListener('input', () => {
             if (radiusVal) radiusVal.textContent = radiusInput.value + ' mi';
+            _paintRadiusFill();
         });
         radiusInput.addEventListener('change', () => {
             if (addrInput && addrInput.value.trim()) _runLocationAnalysis();
         });
+        _paintRadiusFill();  // initial paint
     }
 
     // ── Step 9 — Inline AI Situation Report ─────────────────────────
