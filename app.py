@@ -4038,7 +4038,11 @@ function setupLayers() {{
     window._srcData = window._srcData || {{}};
     function fetchSource(srcName, force) {{
         if (!force && window._srcPromises[srcName]) return window._srcPromises[srcName];
-        const p = fetch('/api/' + srcName + '?t=' + Date.now())
+        // No cache-buster: the /api/* endpoints now send ETag + Cache-Control,
+        // so the browser revalidates with If-None-Match and gets a cheap 304
+        // when nothing changed. A ?t=Date.now() param would make every URL
+        // unique and defeat that caching entirely.
+        const p = fetch('/api/' + srcName)
             .then(r => r.json())
             .then(d => {{
                 window._srcData[srcName] = d;
