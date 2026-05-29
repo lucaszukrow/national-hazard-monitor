@@ -265,12 +265,27 @@ def fetch_storms():
         return []
     storms = data.get("activeStorms", [])
     print(f"  NHC: {len(storms)} active storms")
-    result = []
-    for storm in storms:
+    if not storms:
+        return []
+
+    # Each storm needs a cone + track fetch. Doing them serially meant N×2
+    # sequential round-trips (each with up to 3 retries) — slow during an
+    # active season. Fetch every storm's cone+track concurrently instead.
+    def _fetch_one(storm):
         wallet = storm.get("wallet", "")
         cone   = fetch_json(f"https://www.nhc.noaa.gov/storm_graphics/api/{wallet}_5day_cone_with_line.json")
         track  = fetch_json(f"https://www.nhc.noaa.gov/storm_graphics/api/{wallet}_5day_pts.json")
-        result.append({"name": storm.get("name",""), "cone": cone, "track": track, "info": storm})
+        return {"name": storm.get("name", ""), "cone": cone, "track": track, "info": storm}
+
+    result = []
+    with ThreadPoolExecutor(max_workers=min(len(storms) * 2, 12)) as ex:
+        futures = {ex.submit(_fetch_one, s): s for s in storms}
+        for fut in as_completed(futures):
+            try:
+                result.append(fut.result())
+            except Exception as exc:
+                s = futures[fut]
+                print(f"  NHC storm {s.get('name','?')} fetch failed: {exc}")
     return result
 
 def fetch_fires():
@@ -1201,9 +1216,11 @@ def run_update():
             warnings, state["pop_data"], state["counties_geojson"]
         )
 
-        # Build Folium map
-        print("Building interactive map...")
-        map_html = build_folium_map(warnings, spc, earthquakes, storms, fires)
+        # NOTE: the Folium map is NOT built here. It's only consumed by the
+        # legacy /analytics/ Dash page, which the vast majority of users never
+        # visit (everyone lands on the Mapbox /mapbox view). Building it on
+        # every 30-min cycle was pure waste. It's now built lazily in the Dash
+        # callback (see update_ui) and cached there by last_update.
 
         # Send alerts for new high-priority events
         check_and_send_alerts(warnings, earthquakes, storms, affected)
@@ -1226,7 +1243,6 @@ def run_update():
                 "volcanoes":       volcanoes,
                 "drought":         drought,
                 "shelters":        shelters,
-                "map_html":        map_html,
                 "summary": {
                     "warnings_count":   len(warnings.get("features", [])),
                     "counties_count":   len(affected),
@@ -1259,7 +1275,6 @@ def run_update():
             "drought":         state["drought"],
             "shelters":        state["shelters"],
             "summary":         state["summary"],
-            "map_html":        state["map_html"]
         })
         print("  Cache saved")
 
@@ -1627,36 +1642,56 @@ def start_background_on_first_request():
 # ─────────────────────────────────────────────
 import flask as flask_module
 
+def _data_etag():
+    """ETag for all /api/* data — derived from last_update. Every source is
+    refreshed together in run_update(), so a single timestamp fingerprints
+    the entire dataset. Quoted per the HTTP spec."""
+    return '"' + str(state.get("last_update", "Never")) + '"'
+
+def _client_has_current(etag):
+    """True when the client's If-None-Match matches the current ETag, meaning
+    the data hasn't changed since their last poll and we can skip the payload."""
+    return flask_module.request.headers.get("If-None-Match") == etag
+
+def geojson_response(data):
+    """Standard JSON response for /api/* endpoints, with:
+      - ETag + Cache-Control so browsers can 304 repeat polls (data only
+        changes every ~30 min but clients poll every 5 min)
+      - CORS header (was hand-rolled on every endpoint before)
+    Pass a dict/list to serialize, OR None to force a body-less response
+    (used by building endpoints that already confirmed a 304)."""
+    etag = _data_etag()
+    if _client_has_current(etag):
+        resp = flask_module.Response(status=304)
+    else:
+        resp = flask_module.Response(json.dumps(data), mimetype="application/json")
+    resp.headers["ETag"] = etag
+    resp.headers["Cache-Control"] = "public, max-age=120"
+    resp.headers["Access-Control-Allow-Origin"] = "*"
+    return resp
+
 @app.server.route("/api/warnings")
 def api_warnings():
     """Returns current NWS warnings as GeoJSON."""
-    return flask_module.Response(
-        json.dumps(state["warnings"]),
-        mimetype="application/json",
-        headers={"Access-Control-Allow-Origin": "*"}
-    )
+    return geojson_response(state["warnings"])
 
 @app.server.route("/api/spc")
 def api_spc():
     """Returns SPC convective outlook as GeoJSON."""
-    return flask_module.Response(
-        json.dumps(state["spc"]),
-        mimetype="application/json",
-        headers={"Access-Control-Allow-Origin": "*"}
-    )
+    return geojson_response(state["spc"])
 
 @app.server.route("/api/earthquakes")
 def api_earthquakes():
     """Returns USGS earthquake data as GeoJSON."""
-    return flask_module.Response(
-        json.dumps(state["earthquakes"]),
-        mimetype="application/json",
-        headers={"Access-Control-Allow-Origin": "*"}
-    )
+    return geojson_response(state["earthquakes"])
 
 @app.server.route("/api/fires")
 def api_fires():
     """Returns NASA FIRMS fire data as GeoJSON points."""
+    # Skip the per-fire rebuild entirely if the client already has this cycle.
+    etag = _data_etag()
+    if _client_has_current(etag):
+        return geojson_response(None)
     features = []
     for fire in state.get("fires", []):
         try:
@@ -1676,35 +1711,27 @@ def api_fires():
             })
         except Exception:
             continue
-    return flask_module.Response(
-        json.dumps({"type": "FeatureCollection", "features": features}),
-        mimetype="application/json",
-        headers={"Access-Control-Allow-Origin": "*"}
-    )
+    return geojson_response({"type": "FeatureCollection", "features": features})
 
 @app.server.route("/api/summary")
 def api_summary():
     """Returns current hazard summary stats."""
-    return flask_module.Response(
-        json.dumps({
-            "last_update": state["last_update"],
-            "summary":     state["summary"]
-        }),
-        mimetype="application/json",
-        headers={"Access-Control-Allow-Origin": "*"}
-    )
+    return geojson_response({
+        "last_update": state["last_update"],
+        "summary":     state["summary"]
+    })
 
 @app.server.route("/api/counties")
 def api_counties():
     """Returns affected counties as GeoJSON with population data."""
+    # Skip the full county-set rebuild if the client already has this cycle.
+    etag = _data_etag()
+    if _client_has_current(etag):
+        return geojson_response(None)
     affected = state["summary"].get("affected_counties", [])
     counties_geojson = state.get("counties_geojson")
     if not counties_geojson or not affected:
-        return flask_module.Response(
-            json.dumps({"type": "FeatureCollection", "features": []}),
-            mimetype="application/json",
-            headers={"Access-Control-Allow-Origin": "*"}
-        )
+        return geojson_response({"type": "FeatureCollection", "features": []})
     affected_fips = {c["fips"]: c for c in affected}
     features = []
     for feat in counties_geojson.get("features", []):
@@ -1724,24 +1751,22 @@ def api_counties():
                 "warning_count": county_data.get("warning_count", 1),
             }
             features.append(feat_copy)
-    return flask_module.Response(
-        json.dumps({"type": "FeatureCollection", "features": features}),
-        mimetype="application/json",
-        headers={"Access-Control-Allow-Origin": "*"}
-    )
+    return geojson_response({"type": "FeatureCollection", "features": features})
 
 @app.server.route("/api/infrastructure")
 def api_infrastructure():
     """Returns infrastructure near warning areas as GeoJSON."""
     features = []
+    # Early 304: if the client already fetched infrastructure this update
+    # cycle, skip the (slow) Overpass round-trip entirely.
+    etag = _data_etag()
+    if _client_has_current(etag):
+        return geojson_response(None)
+
     warning_bounds = get_warning_bounds(state["warnings"])
-    
+
     if not warning_bounds:
-        return flask_module.Response(
-            json.dumps({"type": "FeatureCollection", "features": []}),
-            mimetype="application/json",
-            headers={"Access-Control-Allow-Origin": "*"}
-        )
+        return geojson_response({"type": "FeatureCollection", "features": []})
 
     # Build a single expanded bounding box covering all warnings
     all_minlon = min(b["minlon"] for b in warning_bounds) - 1.0
@@ -1759,11 +1784,7 @@ def api_infrastructure():
     cache_key = f"{all_minlon:.1f},{all_minlat:.1f},{all_maxlon:.1f},{all_maxlat:.1f}"
     with state_lock:
         if state.get("infra_cache_key") == cache_key and state.get("infra_features"):
-            return flask_module.Response(
-                json.dumps({"type": "FeatureCollection", "features": state["infra_features"]}),
-                mimetype="application/json",
-                headers={"Access-Control-Allow-Origin": "*"}
-            )
+            return geojson_response({"type": "FeatureCollection", "features": state["infra_features"]})
 
     bbox_str = f"{all_minlat},{all_minlon},{all_maxlat},{all_maxlon}"
 
@@ -1819,16 +1840,15 @@ def api_infrastructure():
         state["infra_cache_key"] = cache_key
         state["infra_features"]  = features
 
-    return flask_module.Response(
-        json.dumps({"type": "FeatureCollection", "features": features}),
-        mimetype="application/json",
-        headers={"Access-Control-Allow-Origin": "*"}
-    )
+    return geojson_response({"type": "FeatureCollection", "features": features})
 
 
 @app.server.route("/api/storms")
 def api_storms():
     """Returns hurricane cones and track points as GeoJSON."""
+    etag = _data_etag()
+    if _client_has_current(etag):
+        return geojson_response(None)
     features = []
     for storm in state.get("storms", []):
         name = storm.get("name", "Storm")
@@ -1849,83 +1869,47 @@ def api_storms():
                         "properties": {**(feat.get("properties") or {}),
                                        "storm_name": name, "layer": "track", "seq": i}
                     })
-    return flask_module.Response(
-        json.dumps({"type": "FeatureCollection", "features": features}),
-        mimetype="application/json",
-        headers={"Access-Control-Allow-Origin": "*"}
-    )
+    return geojson_response({"type": "FeatureCollection", "features": features})
 
 @app.server.route("/api/lightning")
 def api_lightning():
     """Returns recent lightning strikes as GeoJSON."""
-    return flask_module.Response(
-        json.dumps(state.get("lightning", {"type":"FeatureCollection","features":[]})),
-        mimetype="application/json",
-        headers={"Access-Control-Allow-Origin": "*"}
-    )
+    return geojson_response(state.get("lightning", {"type":"FeatureCollection","features":[]}))
 
 @app.server.route("/api/fire_perimeters")
 def api_fire_perimeters():
     """Returns active wildfire perimeters as GeoJSON."""
-    return flask_module.Response(
-        json.dumps(state.get("fire_perimeters", {"type":"FeatureCollection","features":[]})),
-        mimetype="application/json",
-        headers={"Access-Control-Allow-Origin": "*"}
-    )
+    return geojson_response(state.get("fire_perimeters", {"type":"FeatureCollection","features":[]}))
 
 @app.server.route("/api/air_quality")
 def api_air_quality():
     """Returns current AQI monitoring station readings as GeoJSON."""
-    return flask_module.Response(
-        json.dumps(state.get("air_quality", {"type":"FeatureCollection","features":[]})),
-        mimetype="application/json",
-        headers={"Access-Control-Allow-Origin": "*"}
-    )
+    return geojson_response(state.get("air_quality", {"type":"FeatureCollection","features":[]}))
 
 @app.server.route("/api/fema_disasters")
 def api_fema_disasters():
     """Returns active FEMA disaster declarations as GeoJSON state-level points."""
-    return flask_module.Response(
-        json.dumps(state.get("fema_disasters", {"type":"FeatureCollection","features":[]})),
-        mimetype="application/json",
-        headers={"Access-Control-Allow-Origin": "*"}
-    )
+    return geojson_response(state.get("fema_disasters", {"type":"FeatureCollection","features":[]}))
 
 @app.server.route("/api/river_gauges")
 def api_river_gauges():
     """Returns USGS river gauges at or above flood stage as GeoJSON."""
-    return flask_module.Response(
-        json.dumps(state.get("river_gauges", {"type":"FeatureCollection","features":[]})),
-        mimetype="application/json",
-        headers={"Access-Control-Allow-Origin": "*"}
-    )
+    return geojson_response(state.get("river_gauges", {"type":"FeatureCollection","features":[]}))
 
 @app.server.route("/api/volcanoes")
 def api_volcanoes():
     """Returns USGS volcano alert levels as GeoJSON."""
-    return flask_module.Response(
-        json.dumps(state.get("volcanoes", {"type":"FeatureCollection","features":[]})),
-        mimetype="application/json",
-        headers={"Access-Control-Allow-Origin": "*"}
-    )
+    return geojson_response(state.get("volcanoes", {"type":"FeatureCollection","features":[]}))
 
 @app.server.route("/api/drought")
 def api_drought():
     """Returns current US Drought Monitor polygons as GeoJSON."""
-    return flask_module.Response(
-        json.dumps(state.get("drought", {"type":"FeatureCollection","features":[]})),
-        mimetype="application/json",
-        headers={"Access-Control-Allow-Origin": "*"}
-    )
+    return geojson_response(state.get("drought", {"type":"FeatureCollection","features":[]}))
 
 @app.server.route("/api/shelters")
 def api_shelters():
     """Returns FEMA open emergency shelters as GeoJSON."""
-    return flask_module.Response(
-        json.dumps(state.get("shelters", {"type":"FeatureCollection","features":[]})),
-        mimetype="application/json",
-        headers={"Access-Control-Allow-Origin": "*"}
-    )
+    return geojson_response(state.get("shelters", {"type":"FeatureCollection","features":[]}))
 
 @app.server.route("/static/nri_counties.json")
 def serve_nri_counties():
@@ -1964,9 +1948,23 @@ def api_sitrep():
             and 1    <= radius <= 500
         )
         if valid_loc:
+            # Per-location report — genuinely different each time, not cached.
             text, raw = generate_county_sitrep(lat, lng, radius, county)
         else:
-            text, raw = generate_sitrep()
+            # National report is identical for everyone between data updates.
+            # Cache it keyed to last_update so repeat button-presses don't
+            # re-call Groq (saves tokens + latency; the common case is instant).
+            cache_key = state.get("last_update", "Never")
+            if state.get("_sitrep_cache_key") == cache_key and state.get("_sitrep_text"):
+                text, raw = state["_sitrep_text"], state.get("_sitrep_raw", "")
+            else:
+                text, raw = generate_sitrep()
+                # Only cache successful generations (don't cache error strings).
+                if raw:
+                    with state_lock:
+                        state["_sitrep_cache_key"] = cache_key
+                        state["_sitrep_text"]      = text
+                        state["_sitrep_raw"]       = raw
     return flask_module.jsonify({"text": text, "raw": raw or ""})
 
 
@@ -6526,7 +6524,25 @@ def update_ui(n, watchzone):
         card(s.get("wildfires", 0),        "Fire Detections",              "#FF4500"),
     ]
 
-    # Map — inject yellow highlight layer for watchzone when active
+    # Map — built lazily here (not on every background cycle) and cached by
+    # last_update, so it's only regenerated when the data actually changes.
+    # This page (/analytics/) is the only consumer of the Folium map.
+    if state.get("_folium_built_for") != state["last_update"] and state["last_update"] != "Never":
+        try:
+            built = build_folium_map(
+                state.get("warnings", {"type": "FeatureCollection", "features": []}),
+                state.get("spc", {"type": "FeatureCollection", "features": []}),
+                state.get("earthquakes", {"type": "FeatureCollection", "features": []}),
+                state.get("storms", []),
+                state.get("fires", []),
+            )
+            with state_lock:
+                state["map_html"] = built
+                state["_folium_built_for"] = state["last_update"]
+        except Exception as e:
+            print(f"  Folium lazy-build failed: {e}")
+
+    # Inject yellow highlight layer for watchzone when active
     map_html_source = state.get("map_html", "")
     if not map_html_source:
         map_content = html.P(
